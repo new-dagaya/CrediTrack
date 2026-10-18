@@ -1,0 +1,6 @@
+{
+  "name": "CrediTrack - Personal Credit Card Manager & Sheets Sync",
+  "description": "Mobile-optimized personal credit card manager with PIN security, dynamic card trackers, Google Sheets two-way sync, and payment analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
