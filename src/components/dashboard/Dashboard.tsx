@@ -265,8 +265,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
               onClick={onManualSync}
               disabled={isSyncingGoogle}
               type="button"
-              aria-label="Force immediate manual sync with Google Drive"
-              title="Force immediate manual sync with Google Drive"
+              aria-label="Force immediate one-way write sync to Google Drive"
+              title="Overwrite CrediTrack_Card_Manager in Google Drive with current app data (One-Way Write)"
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer disabled:cursor-wait neon-btn-sync neon-pulse-sync"
             >
               <RefreshCw

@@ -86,12 +86,12 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onManualSync}
           disabled={isSyncing}
           type="button"
-          aria-label="Force immediate manual sync with Google Drive"
+          aria-label="Force immediate one-way write sync to Google Drive"
           title={
             isSyncing
-              ? 'Synchronizing cards & transactions with Google Drive...'
+              ? 'Pushing current cards & transactions to Google Drive...'
               : hasGoogleUser
-              ? 'Click to force an immediate read/write sync with CrediTrack_Card_Manager in Google Drive'
+              ? 'Click to overwrite CrediTrack_Card_Manager in Google Drive with current app data (One-Way Write)'
               : 'Sign in & Sync with Google Drive'
           }
           className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-black transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer disabled:cursor-wait neon-btn-sync neon-pulse-sync group"

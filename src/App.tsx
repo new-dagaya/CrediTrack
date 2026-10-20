@@ -30,7 +30,6 @@ import {
 } from './utils/googleAuth';
 import { 
   checkSpreadsheetExists,
-  loadDataFromGoogleSpreadsheet,
   createTrackingSpreadsheet,
   syncSingleCardTabToGoogleSheet,
   saveCardMetadataToGoogleSheet,
@@ -38,7 +37,7 @@ import {
   deleteCardTabFromGoogleSheet,
   renameCardTabInGoogleSheet,
   getCardTabTitle,
-  performFullManualSync,
+  performOneWayWriteSync,
   SPREADSHEET_NAME,
   GoogleSpreadsheetInfo 
 } from './utils/googleDriveSync';
@@ -208,54 +207,34 @@ export default function App() {
     }
   }, [spreadsheetInfo, googleUser?.uid]);
 
-  // AUTO-LOAD OR INITIALIZE GOOGLE DRIVE DATA
-  const handleAutoLoadOrInitDrive = useCallback(
-    async (token: string, uid?: string | null) => {
+  // CONNECT OR INITIALIZE GOOGLE DRIVE SPREADSHEET (NO READING OF OLD DATA)
+  const handleConnectOrInitDrive = useCallback(
+    async (token: string) => {
       setIsConnectingGoogle(true);
-      setIsSyncingGoogle(true);
       try {
-        // 1. Scan Google Drive to check if "CrediTrack_Card_Manager" already exists
+        // Scan Google Drive to check if "CrediTrack_Card_Manager" already exists
         const search = await checkSpreadsheetExists(token);
 
         if (search.exists && search.file) {
-          // If found, automatically read and load all previously saved credit card configurations,
-          // structural tabs, and logged transactions into the app dashboard context
-          const loaded = await loadDataFromGoogleSpreadsheet(token, search.file.id);
-
-          if (loaded.cards && loaded.cards.length > 0) {
-            setCards(loaded.cards);
-            setTransactionsByCard(loaded.transactionsByCard);
-
-            try {
-              localStorage.setItem(getCardsStorageKey(uid), JSON.stringify(loaded.cards));
-              localStorage.setItem(getTxsStorageKey(uid), JSON.stringify(loaded.transactionsByCard));
-            } catch (e) {
-              console.error('Failed caching loaded cards locally:', e);
-            }
-
-            const info: GoogleSpreadsheetInfo = {
-              spreadsheetId: search.file.id,
-              webViewLink: search.file.webViewLink,
-              title: search.file.name || SPREADSHEET_NAME,
-              lastSyncedAt: Date.now(),
-              lastSyncStatus: 'success',
-              syncedTabs: loaded.cards.map(getCardTabTitle),
-            };
-            setSpreadsheetInfo(info);
-            return;
-          }
+          // File found: Link to it directly WITHOUT reading or fetching old data into local state.
+          // Local memory remains authoritative and is NEVER overwritten with outdated sheet values.
+          const info: GoogleSpreadsheetInfo = {
+            spreadsheetId: search.file.id,
+            webViewLink: search.file.webViewLink,
+            title: search.file.name || SPREADSHEET_NAME,
+            lastSyncedAt: Date.now(),
+            lastSyncStatus: 'success',
+            syncedTabs: cards.map(getCardTabTitle),
+          };
+          setSpreadsheetInfo(info);
+          return;
         }
 
-        // If it does not exist, only then create a new tracking spreadsheet structure
-        const userCards = loadUserCards(uid);
-        const userTxs = loadUserTransactions(uid);
-        setCards(userCards);
-        setTransactionsByCard(userTxs);
-
-        const created = await createTrackingSpreadsheet(token, userCards, userTxs);
+        // If it does not exist on Google Drive, initialize a fresh spreadsheet with current app data
+        const created = await createTrackingSpreadsheet(token, cards, transactionsByCard);
         setSpreadsheetInfo(created);
       } catch (err: any) {
-        console.error('Google Drive auto-load/initialization failed:', err);
+        console.error('Google Drive connection failed:', err);
         setSpreadsheetInfo((prev) =>
           prev
             ? { ...prev, lastSyncStatus: 'error', lastError: err?.message }
@@ -263,10 +242,9 @@ export default function App() {
         );
       } finally {
         setIsConnectingGoogle(false);
-        setIsSyncingGoogle(false);
       }
     },
-    []
+    [cards, transactionsByCard]
   );
 
   // Initialize Firebase Auth listener on startup
@@ -299,9 +277,9 @@ export default function App() {
           setIsLocked(userSec.isPinSet ? true : false);
         }
 
-        // Automatically scan Google Drive and load existing spreadsheet or create if needed
+        // Connect to Google Drive spreadsheet without fetching or overwriting local data with old values
         if (token) {
-          await handleAutoLoadOrInitDrive(token, user.uid);
+          await handleConnectOrInitDrive(token);
         }
       },
       () => {
@@ -310,7 +288,7 @@ export default function App() {
       }
     );
     return () => unsubscribe();
-  }, [handleAutoLoadOrInitDrive]);
+  }, [handleConnectOrInitDrive]);
 
   // Delayed Auto-Lock when leaving or minimizing the app
   useEffect(() => {
@@ -411,8 +389,8 @@ export default function App() {
         setIsLocked(true);
       }
 
-      // Automatically scan Google Drive and auto-load existing data or create new
-      await handleAutoLoadOrInitDrive(token, user.uid);
+      // Connect to Google Drive spreadsheet without fetching or reading old data
+      await handleConnectOrInitDrive(token);
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
       alert(`Google Drive error: ${err?.message || 'Could not complete Google setup.'}`);
@@ -529,7 +507,7 @@ export default function App() {
     [googleToken, spreadsheetInfo?.spreadsheetId]
   );
 
-  // FORCED IMMEDIATE MANUAL SYNCHRONIZATION WITH GOOGLE DRIVE
+  // STRICT ONE-WAY MANUAL WRITE/UPDATE SYNCHRONIZATION WITH GOOGLE DRIVE
   const handleManualSyncNow = async () => {
     let token = googleToken;
     if (!token) {
@@ -548,23 +526,24 @@ export default function App() {
 
     setIsSyncingGoogle(true);
     try {
-      const syncResult = await performFullManualSync(token, cards, transactionsByCard);
+      // Strictly one-way write: takes current local cards & transactions and completely overwrites Google Sheet
+      // Never pulls or overwrites local memory with outdated values
+      const syncResult = await performOneWayWriteSync(token, cards, transactionsByCard);
       if (syncResult.success) {
-        setCards(syncResult.cards);
-        setTransactionsByCard(syncResult.transactionsByCard);
         setSpreadsheetInfo(syncResult.spreadsheetInfo);
 
-        // Cache locally for isolated user session
+        // Update spreadsheet link info locally
         try {
-          localStorage.setItem(getCardsStorageKey(googleUser?.uid), JSON.stringify(syncResult.cards));
-          localStorage.setItem(getTxsStorageKey(googleUser?.uid), JSON.stringify(syncResult.transactionsByCard));
-          localStorage.setItem(getSheetInfoStorageKey(googleUser?.uid), JSON.stringify(syncResult.spreadsheetInfo));
+          localStorage.setItem(
+            getSheetInfoStorageKey(googleUser?.uid),
+            JSON.stringify(syncResult.spreadsheetInfo)
+          );
         } catch (storageErr) {
-          console.warn('Failed caching updated cards after manual sync:', storageErr);
+          console.warn('Failed caching updated spreadsheet info:', storageErr);
         }
       }
     } catch (err: any) {
-      console.error('Manual synchronization failed:', err);
+      console.error('One-way manual write synchronization failed:', err);
       setSpreadsheetInfo((prev) =>
         prev
           ? { ...prev, lastSyncStatus: 'error', lastError: err?.message || 'Manual synchronization failed' }
