@@ -19,7 +19,8 @@ import {
   AlertTriangle,
   UserCheck,
   Calendar,
-  Percent
+  Percent,
+  RefreshCw
 } from 'lucide-react';
 import { CardProfile, Transaction } from '../../types';
 import { formatCurrency, getMonthLabel } from '../../utils/formatters';
@@ -50,6 +51,7 @@ interface DashboardProps {
   isSyncingGoogle?: boolean;
   onSignInGoogle?: () => void;
   onSignOutGoogle?: () => void;
+  onManualSync?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -67,6 +69,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isSyncingGoogle = false,
   onSignInGoogle,
   onSignOutGoogle,
+  onManualSync,
 }) => {
   const [isAddCardOpen, setIsAddCardOpen] = useState(false);
   const [cardToEdit, setCardToEdit] = useState<CardProfile | null>(null);
@@ -255,7 +258,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {/* Neon Styled Manual Sync Now Button */}
+          {onManualSync && (
+            <button
+              onClick={onManualSync}
+              disabled={isSyncingGoogle}
+              type="button"
+              aria-label="Force immediate manual sync with Google Drive"
+              title="Force immediate manual sync with Google Drive"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer disabled:cursor-wait neon-btn-sync neon-pulse-sync"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 text-cyan-600 dark:text-cyan-300 stroke-[2.6] ${
+                  isSyncingGoogle ? 'animate-spin text-cyan-500' : ''
+                }`}
+              />
+              <span className="text-cyan-700 dark:text-cyan-300">
+                {isSyncingGoogle ? 'Syncing...' : 'Sync Now'}
+              </span>
+            </button>
+          )}
+
           {/* Neon Styled Drive Guide Button */}
           <button
             onClick={onOpenGuide}

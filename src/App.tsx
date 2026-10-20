@@ -38,6 +38,7 @@ import {
   deleteCardTabFromGoogleSheet,
   renameCardTabInGoogleSheet,
   getCardTabTitle,
+  performFullManualSync,
   SPREADSHEET_NAME,
   GoogleSpreadsheetInfo 
 } from './utils/googleDriveSync';
@@ -528,6 +529,52 @@ export default function App() {
     [googleToken, spreadsheetInfo?.spreadsheetId]
   );
 
+  // FORCED IMMEDIATE MANUAL SYNCHRONIZATION WITH GOOGLE DRIVE
+  const handleManualSyncNow = async () => {
+    let token = googleToken;
+    if (!token) {
+      try {
+        token = await getAccessToken();
+      } catch (e) {
+        console.warn('Could not retrieve existing token:', e);
+      }
+    }
+
+    if (!token) {
+      // If user has not connected Google account yet, trigger Google OAuth flow
+      handleRequestSignInGoogle();
+      return;
+    }
+
+    setIsSyncingGoogle(true);
+    try {
+      const syncResult = await performFullManualSync(token, cards, transactionsByCard);
+      if (syncResult.success) {
+        setCards(syncResult.cards);
+        setTransactionsByCard(syncResult.transactionsByCard);
+        setSpreadsheetInfo(syncResult.spreadsheetInfo);
+
+        // Cache locally for isolated user session
+        try {
+          localStorage.setItem(getCardsStorageKey(googleUser?.uid), JSON.stringify(syncResult.cards));
+          localStorage.setItem(getTxsStorageKey(googleUser?.uid), JSON.stringify(syncResult.transactionsByCard));
+          localStorage.setItem(getSheetInfoStorageKey(googleUser?.uid), JSON.stringify(syncResult.spreadsheetInfo));
+        } catch (storageErr) {
+          console.warn('Failed caching updated cards after manual sync:', storageErr);
+        }
+      }
+    } catch (err: any) {
+      console.error('Manual synchronization failed:', err);
+      setSpreadsheetInfo((prev) =>
+        prev
+          ? { ...prev, lastSyncStatus: 'error', lastError: err?.message || 'Manual synchronization failed' }
+          : null
+      );
+    } finally {
+      setIsSyncingGoogle(false);
+    }
+  };
+
   // PIN security unlock handlers
   const handleUnlockSuccess = () => {
     setIsLocked(false);
@@ -755,6 +802,10 @@ export default function App() {
         activeView={activeViewName}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onManualSync={handleManualSyncNow}
+        isSyncing={isSyncingGoogle}
+        hasGoogleUser={Boolean(googleUser)}
+        lastSyncedAt={spreadsheetInfo?.lastSyncedAt}
       />
 
       {/* Main View Area */}
@@ -801,6 +852,7 @@ export default function App() {
             isSyncingGoogle={isSyncingGoogle}
             onSignInGoogle={handleRequestSignInGoogle}
             onSignOutGoogle={handleSignOutGoogle}
+            onManualSync={handleManualSyncNow}
           />
         )}
       </main>

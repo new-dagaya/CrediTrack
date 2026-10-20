@@ -858,3 +858,113 @@ export async function renameCardTabInGoogleSheet(
     return { success: false, error: error?.message || 'Failed to rename sheet tab' };
   }
 }
+
+/**
+ * FORCED IMMEDIATE MANUAL SYNCHRONIZATION:
+ * Explicitly queries Google Drive for "CrediTrack_Card_Manager".
+ * Reads all remote sheet tabs and configurations, merges card profiles and logged transactions,
+ * sorts all transactions chronologically by date, recalculates running balances,
+ * and writes/syncs all current card contexts and transaction history directly to Google Drive.
+ * If the spreadsheet does not exist yet, creates it.
+ */
+export async function performFullManualSync(
+  accessToken: string,
+  currentCards: CardProfile[],
+  currentTransactions: Record<string, Transaction[]>
+): Promise<{
+  success: boolean;
+  cards: CardProfile[];
+  transactionsByCard: Record<string, Transaction[]>;
+  spreadsheetInfo: GoogleSpreadsheetInfo;
+  error?: string;
+}> {
+  if (!accessToken) {
+    throw new Error('Google OAuth access token is required for manual synchronization.');
+  }
+
+  // 1. Explicitly check if "CrediTrack_Card_Manager" exists on Google Drive
+  const search = await checkSpreadsheetExists(accessToken);
+
+  if (!search.exists || !search.file) {
+    // Spreadsheet does not exist yet -> Create new tracking spreadsheet
+    const createdInfo = await createTrackingSpreadsheet(accessToken, currentCards, currentTransactions);
+    return {
+      success: true,
+      cards: currentCards,
+      transactionsByCard: currentTransactions,
+      spreadsheetInfo: createdInfo,
+    };
+  }
+
+  const sheetId = search.file.id;
+  const webViewLink =
+    search.file.webViewLink || `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+  // 2. Read existing cards and transactions from Google Sheet
+  const remoteData = await loadDataFromGoogleSpreadsheet(accessToken, sheetId);
+
+  // 3. Merge Card Profiles:
+  // Build lookup from remote cards, then overlay current app card context
+  const cardMap = new Map<string, CardProfile>();
+  remoteData.cards.forEach((rc) => {
+    cardMap.set(rc.id, rc);
+  });
+  currentCards.forEach((cc) => {
+    cardMap.set(cc.id, {
+      ...(cardMap.get(cc.id) || {}),
+      ...cc,
+    });
+  });
+  const mergedCards = Array.from(cardMap.values());
+
+  // 4. Merge and chronologically sort all transactions per card
+  const mergedTxsByCard: Record<string, Transaction[]> = {};
+  for (const card of mergedCards) {
+    const localTxs = currentTransactions[card.id] || [];
+    const remoteTxs = remoteData.transactionsByCard[card.id] || [];
+
+    const txMap = new Map<string, Transaction>();
+    const seenSignatures = new Set<string>();
+
+    const addTx = (tx: Transaction) => {
+      const sig = `${tx.date}_${tx.type}_${tx.amount}_${(tx.description || '').trim()}`;
+      if (!seenSignatures.has(sig)) {
+        seenSignatures.add(sig);
+        txMap.set(tx.id, tx);
+      }
+    };
+
+    remoteTxs.forEach(addTx);
+    localTxs.forEach(addTx);
+
+    // Ensure all transactions remain sorted chronologically by date
+    const sorted = Array.from(txMap.values()).sort((a, b) => {
+      const timeA = parseTxDate(a.date, a.createdAt);
+      const timeB = parseTxDate(b.date, b.createdAt);
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+
+    mergedTxsByCard[card.id] = recalculateBalances(sorted);
+  }
+
+  // 5. Write and synchronize all card profiles and transactions into the Google Sheet file
+  await syncAllCardsToGoogleSheet(accessToken, sheetId, mergedCards, mergedTxsByCard);
+
+  const updatedSpreadsheetInfo: GoogleSpreadsheetInfo = {
+    spreadsheetId: sheetId,
+    webViewLink,
+    title: search.file.name || SPREADSHEET_NAME,
+    lastSyncedAt: Date.now(),
+    lastSyncStatus: 'success',
+    syncedTabs: mergedCards.map(getCardTabTitle),
+  };
+
+  return {
+    success: true,
+    cards: mergedCards,
+    transactionsByCard: mergedTxsByCard,
+    spreadsheetInfo: updatedSpreadsheetInfo,
+  };
+}
+
