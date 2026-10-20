@@ -51,23 +51,25 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-slideUp">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-md w-full shadow-2xl overflow-hidden animate-slideUp">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900/90">
+        <div className="px-6 py-4 border-b border-slate-200/90 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900/90">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <CreditCard className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-400/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+              <CreditCard className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Add New Credit Card</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white drop-shadow-[0_0_6px_rgba(16,185,129,0.2)]">
+                Add New Credit Card
+              </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">Generate a separate dedicated tracker page</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -77,7 +79,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/60 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800/60 text-rose-800 dark:text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
@@ -85,7 +87,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
 
           {/* Quick Bank Suggestions */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Popular Quick Pick</label>
+            <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Popular Quick Pick</label>
             <div className="flex flex-wrap gap-1.5">
               {['HNB', 'Seylan', 'HSBC', 'NTB Amex', 'DFCC'].map((bank) => (
                 <button
@@ -95,7 +97,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
                     setName(`${bank} Credit Card`);
                     setBankName(bank);
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-300 transition-colors"
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
                 >
                   {bank}
                 </button>
@@ -105,58 +107,57 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
 
           {/* Card Name */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Card Name *</label>
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Card Name *</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. HNB Platinum, Seylan Freedom, NTB Amex"
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
-              autoFocus
+              placeholder="e.g. Commercial Bank Mastercard"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
             />
           </div>
 
-          {/* Bank Name */}
+          {/* Bank / Issuer */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Bank / Issuer</label>
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Bank / Issuer</label>
             <input
               type="text"
               value={bankName}
               onChange={(e) => setBankName(e.target.value)}
-              placeholder="e.g. Hatton National Bank, Seylan Bank"
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+              placeholder="e.g. Commercial Bank, Sampath Bank"
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
             />
           </div>
 
-          {/* Last 4 Digits & Credit Limit */}
+          {/* Mask & Limit Grid */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Last 4 Digits</label>
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Last 4 Digits</label>
               <input
                 type="text"
                 maxLength={4}
                 value={last4}
-                onChange={(e) => setLast4(e.target.value)}
-                placeholder="4892"
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                onChange={(e) => setLast4(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 5432"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Credit Limit (Rs.)</label>
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Credit Limit (Rs.)</label>
               <input
                 type="text"
                 value={creditLimit}
                 onChange={(e) => setCreditLimit(e.target.value)}
-                placeholder="250,000"
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                placeholder="e.g. 350,000"
+                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
               />
             </div>
           </div>
 
-          {/* Card Theme Color Picker */}
+          {/* Color theme */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Card Design Accent</label>
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Card Theme Color</label>
             <div className="flex items-center gap-2.5 pt-1">
               {[
                 { id: 'emerald', label: 'Emerald', bg: 'bg-emerald-500' },
@@ -171,8 +172,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
                   key={c.id}
                   type="button"
                   onClick={() => setThemeColor(c.id as any)}
-                  className={`w-7 h-7 rounded-full ${c.bg} transition-transform ${
-                    themeColor === c.id ? 'ring-2 ring-emerald-500 dark:ring-white scale-110' : 'opacity-70 hover:opacity-100'
+                  className={`w-7 h-7 rounded-full ${c.bg} transition-all cursor-pointer ${
+                    themeColor === c.id ? 'ring-2 ring-emerald-500 dark:ring-white scale-110 shadow-md' : 'opacity-70 hover:opacity-100'
                   }`}
                   title={c.label}
                 />
@@ -185,13 +186,13 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({ isOpen, onClose, onA
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+              className="flex-1 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer active:scale-95"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+              className="flex-1 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-xs font-black border border-emerald-400/80 shadow-[0_0_16px_rgba(16,185,129,0.5)] hover:shadow-[0_0_22px_rgba(16,185,129,0.7)] transition-all cursor-pointer"
             >
               Create Card Tracker
             </button>

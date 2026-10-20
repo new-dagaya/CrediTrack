@@ -4,6 +4,9 @@ import {
   getStoredSecurityConfig, 
   saveSecurityConfig,
   hasUserConfiguredPin,
+  recordLeaveTimestamp,
+  shouldAutoLockOnReturn,
+  clearLeaveTimestamp
 } from './utils/security';
 import { 
   INITIAL_CARDS, 
@@ -18,6 +21,7 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { CardDetailView } from './components/tracker/CardDetailView';
 import { SheetsOnboardingGuide } from './components/sheets/SheetsOnboardingGuide';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { GoogleOAuthConsentModal } from './components/common/GoogleOAuthConsentModal';
 import { 
   initAuth, 
   googleSignIn, 
@@ -29,6 +33,9 @@ import {
   syncAllCardsToGoogleSheet, 
   appendTransactionToGoogleSheet, 
   ensureCardTabExists,
+  deleteCardTabFromGoogleSheet,
+  renameCardTabInGoogleSheet,
+  getCardTabTitle,
   GoogleSpreadsheetInfo 
 } from './utils/googleDriveSync';
 
@@ -116,7 +123,29 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [bottomNavTab, setBottomNavTab] = useState<'dashboard' | 'cards' | 'guide' | 'settings'>('dashboard');
 
-  // 5. Theme State (Dark / Light Mode)
+  // 5. Google Drive OAuth Consent Prompt State
+  const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+
+  // 6. Android 15 Widget Shortcut Auto-Trigger
+  const [autoOpenTxCardId, setAutoOpenTxCardId] = useState<string | null>(null);
+
+  // Android 15 Home Screen Widget Shortcut deep link handling (?action=add_tx&cardId=...)
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const action = urlParams.get('action');
+      const targetCardId = urlParams.get('cardId');
+      if (action === 'add_tx' && targetCardId) {
+        setSelectedCardId(targetCardId);
+        setAutoOpenTxCardId(targetCardId);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // 7. Theme State (Dark / Light Mode)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const stored = localStorage.getItem('creditrack_theme');
@@ -124,7 +153,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-    return 'dark'; // default to dark
+    return 'light'; // Default to light mode with vibrant neon accents
   });
 
   // Apply theme class to <html>
@@ -133,8 +162,10 @@ export default function App() {
       localStorage.setItem('creditrack_theme', theme);
       if (theme === 'dark') {
         document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
       } else {
         document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
       }
     } catch (e) {
       console.error(e);
@@ -215,14 +246,53 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Handle auto-lock on inactivity
+  // Delayed Auto-Lock when leaving or minimizing the app (does not lock immediately)
+  useEffect(() => {
+    if (!securityConfig.isPinSet || isLocked) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        recordLeaveTimestamp();
+      } else if (document.visibilityState === 'visible') {
+        const timeout = securityConfig.lockTimeoutMinutes || 2;
+        if (shouldAutoLockOnReturn(timeout)) {
+          setIsLocked(true);
+        }
+        clearLeaveTimestamp();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      recordLeaveTimestamp();
+    };
+
+    const handleWindowFocus = () => {
+      const timeout = securityConfig.lockTimeoutMinutes || 2;
+      if (shouldAutoLockOnReturn(timeout)) {
+        setIsLocked(true);
+      }
+      clearLeaveTimestamp();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [securityConfig, isLocked]);
+
+  // Delayed Inactivity Timer
   useEffect(() => {
     if (!securityConfig.isPinSet || isLocked) return;
 
     let timeoutId: any;
     const resetTimer = () => {
       clearTimeout(timeoutId);
-      const minutes = securityConfig.lockTimeoutMinutes || 5;
+      const minutes = securityConfig.lockTimeoutMinutes || 2;
       timeoutId = setTimeout(() => {
         setIsLocked(true);
       }, minutes * 60 * 1000);
@@ -237,6 +307,16 @@ export default function App() {
       events.forEach((evt) => window.removeEventListener(evt, resetTimer));
     };
   }, [securityConfig, isLocked]);
+
+  // Google Sign-In Consent Gate
+  const handleRequestSignInGoogle = () => {
+    setIsConsentModalOpen(true);
+  };
+
+  const handleConfirmConsentAndSignIn = async () => {
+    setIsConsentModalOpen(false);
+    await handleSignInGoogle();
+  };
 
   // Google Drive & Sheets: Sign in and automatic multi-sheet spreadsheet generation + initial sync
   const handleSignInGoogle = async () => {
@@ -396,7 +476,8 @@ export default function App() {
     }
   };
 
-  const handleDeleteCard = (cardId: string) => {
+  const handleDeleteCard = async (cardId: string) => {
+    const cardToDelete = cards.find((c) => c.id === cardId);
     const remainingCards = cards.filter((c) => c.id !== cardId);
     setCards(remainingCards);
     setTransactionsByCard((prev) => {
@@ -408,23 +489,47 @@ export default function App() {
       setSelectedCardId(null);
     }
 
-    // Update Google Sheet if connected
-    if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      const remainingTxs = { ...transactionsByCard };
-      delete remainingTxs[cardId];
-      syncAllCardsToGoogleSheet(
-        googleToken,
-        spreadsheetInfo.spreadsheetId,
-        remainingCards,
-        remainingTxs
-      ).catch((err) => console.error('Sheet update on card delete failed:', err));
+    // Automatically delete the corresponding individual sheet/tab from the Google Sheet file in their Google Drive as well!
+    if (googleToken && spreadsheetInfo?.spreadsheetId && cardToDelete) {
+      try {
+        await deleteCardTabFromGoogleSheet(
+          googleToken,
+          spreadsheetInfo.spreadsheetId,
+          cardToDelete
+        );
+      } catch (err) {
+        console.error('Failed to delete tab from Google Sheet on card deletion:', err);
+      }
     }
   };
 
-  const handleUpdateCardConfig = (cardId: string, updated: Partial<CardProfile>) => {
+  const handleUpdateCardConfig = async (cardId: string, updated: Partial<CardProfile>) => {
+    const oldCard = cards.find((c) => c.id === cardId);
     setCards((prev) =>
       prev.map((c) => (c.id === cardId ? { ...c, ...updated } : c))
     );
+
+    // If card name was changed, rename its dedicated tab in the Google Sheet!
+    if (
+      googleToken && 
+      spreadsheetInfo?.spreadsheetId && 
+      oldCard && 
+      updated.name && 
+      updated.name !== oldCard.name
+    ) {
+      const oldTitle = getCardTabTitle(oldCard);
+      const newTitle = getCardTabTitle({ ...oldCard, ...updated });
+      try {
+        await renameCardTabInGoogleSheet(
+          googleToken,
+          spreadsheetInfo.spreadsheetId,
+          oldTitle,
+          newTitle
+        );
+      } catch (err) {
+        console.error('Failed to rename tab in Google Sheet on edit:', err);
+      }
+    }
   };
 
   // Transaction mutations with automatic sequential balance recalculation and live Google Drive multi-sheet sync!
@@ -443,22 +548,23 @@ export default function App() {
           syncedToSheet: Boolean(spreadsheetInfo?.spreadsheetId),
         };
         const updatedList = recalculateBalances([...existing, newTx]);
-        const finalTx = updatedList[updatedList.length - 1];
-
-        // Background automatic append to this card's dedicated tab in Google Sheet if connected
-        if (googleToken && spreadsheetInfo?.spreadsheetId && targetCard) {
-          appendTransactionToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            finalTx,
-            targetCard
-          ).catch((e) => console.error('Auto-append to dedicated card tab failed:', e));
-        }
-
-        return {
+        
+        const newMap = {
           ...prev,
           [cardId]: updatedList,
         };
+
+        // Real-time synchronization to connected Google Sheet
+        if (googleToken && spreadsheetInfo?.spreadsheetId && targetCard) {
+          syncAllCardsToGoogleSheet(
+            googleToken,
+            spreadsheetInfo.spreadsheetId,
+            cards,
+            newMap
+          ).catch((e) => console.error('Real-time sheet sync failed:', e));
+        }
+
+        return newMap;
       });
     },
     [cards, googleToken, spreadsheetInfo]
@@ -499,12 +605,23 @@ export default function App() {
   );
 
   const handleDeleteTransaction = useCallback(
-    async (txToDelete: Transaction) => {
-      const cardId = txToDelete.cardId;
+    async (target: string | Transaction) => {
+      const txId = typeof target === 'string' ? target : target.id;
 
       setTransactionsByCard((prev) => {
+        let cardId = typeof target === 'object' ? target.cardId : '';
+        if (!cardId) {
+          for (const [cId, txs] of Object.entries(prev)) {
+            if (txs.some((t) => t.id === txId)) {
+              cardId = cId;
+              break;
+            }
+          }
+        }
+        if (!cardId) return prev;
+
         const existing = prev[cardId] || [];
-        const filtered = existing.filter((t) => t.id !== txToDelete.id);
+        const filtered = existing.filter((t) => t.id !== txId);
         const recalculated = recalculateBalances(filtered);
 
         const newMap = {
@@ -529,10 +646,17 @@ export default function App() {
   );
 
   const handleImportTransactions = useCallback(
-    (cardId: string, imported: Transaction[], mode: 'replace' | 'append') => {
+    (cardId: string, imported: (Transaction | Omit<Transaction, 'id' | 'balance' | 'createdAt'>)[], mode: 'replace' | 'append') => {
+      const preparedTransactions: Transaction[] = imported.map((item, idx) => ({
+        ...item,
+        id: ('id' in item && item.id) ? item.id : `tx-imp-${Date.now()}-${idx}`,
+        balance: ('balance' in item && typeof item.balance === 'number') ? item.balance : 0,
+        createdAt: ('createdAt' in item && typeof item.createdAt === 'number') ? item.createdAt : Date.now() + idx,
+      }));
+
       setTransactionsByCard((prev) => {
         const existing = prev[cardId] || [];
-        const combined = mode === 'replace' ? imported : [...existing, ...imported];
+        const combined = mode === 'replace' ? preparedTransactions : [...existing, ...preparedTransactions];
         const recalculated = recalculateBalances(combined);
 
         const newMap = {
@@ -602,7 +726,7 @@ export default function App() {
     : 'dashboard';
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
       {/* Top Header */}
       <Header
         onLockApp={handleManualLock}
@@ -633,22 +757,31 @@ export default function App() {
             googleUser={googleUser}
             spreadsheetInfo={spreadsheetInfo}
             isGoogleSyncing={isSyncingGoogle}
-            onConnectGoogle={handleSignInGoogle}
+            onConnectGoogle={handleRequestSignInGoogle}
             onSyncAllToGoogleDrive={handleSyncGoogleNow}
+            initialOpenTxModal={autoOpenTxCardId === selectedCard.id}
           />
         ) : (
           <Dashboard
             cards={cards}
             transactionsByCard={transactionsByCard}
-            onSelectCard={(card) => setSelectedCardId(card.id)}
+            onSelectCard={(card) => {
+              setSelectedCardId(card.id);
+              setAutoOpenTxCardId(null);
+            }}
             onAddCard={handleAddCard}
+            onEditCard={handleUpdateCardConfig}
             onDeleteCard={handleDeleteCard}
             onOpenGuide={() => setIsGuideOpen(true)}
+            onQuickAddForCard={(card) => {
+              setSelectedCardId(card.id);
+              setAutoOpenTxCardId(card.id);
+            }}
             googleUser={googleUser}
             spreadsheetInfo={spreadsheetInfo}
             isConnectingGoogle={isConnectingGoogle}
             isSyncingGoogle={isSyncingGoogle}
-            onSignInGoogle={handleSignInGoogle}
+            onSignInGoogle={handleRequestSignInGoogle}
             onSignOutGoogle={handleSignOutGoogle}
             onSyncGoogleNow={handleSyncGoogleNow}
           />
@@ -662,9 +795,11 @@ export default function App() {
           setBottomNavTab(tab);
           if (tab === 'dashboard') {
             setSelectedCardId(null);
+            setAutoOpenTxCardId(null);
           } else if (tab === 'cards') {
             if (cards.length > 0) {
               setSelectedCardId(cards[0].id);
+              setAutoOpenTxCardId(null);
             }
           } else if (tab === 'guide') {
             setIsGuideOpen(true);
@@ -680,7 +815,7 @@ export default function App() {
           onClose={() => setIsGuideOpen(false)}
           sheetLink={spreadsheetInfo?.webViewLink}
           isConnected={Boolean(googleUser && spreadsheetInfo?.spreadsheetId)}
-          onConnectGoogle={handleSignInGoogle}
+          onConnectGoogle={handleRequestSignInGoogle}
         />
       )}
 
@@ -698,9 +833,17 @@ export default function App() {
         spreadsheetInfo={spreadsheetInfo}
         isConnectingGoogle={isConnectingGoogle}
         isSyncingGoogle={isSyncingGoogle}
-        onSignInGoogle={handleSignInGoogle}
+        onSignInGoogle={handleRequestSignInGoogle}
         onSignOutGoogle={handleSignOutGoogle}
         onSyncGoogleNow={handleSyncGoogleNow}
+      />
+
+      {/* First-time Google OAuth Permission Consent Prompt */}
+      <GoogleOAuthConsentModal
+        isOpen={isConsentModalOpen}
+        onClose={() => setIsConsentModalOpen(false)}
+        onConfirmConsent={handleConfirmConsentAndSignIn}
+        isConnecting={isConnectingGoogle}
       />
     </div>
   );

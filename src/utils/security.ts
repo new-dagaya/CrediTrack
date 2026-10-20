@@ -97,3 +97,54 @@ export function clearSecurityConfig(userId?: string | null): void {
   const key = getSecurityStorageKey(userId);
   localStorage.removeItem(key);
 }
+
+const LEAVE_TIME_KEY = 'creditrack_leave_timestamp';
+
+/**
+ * Records the timestamp when the user leaves or minimizes the app.
+ */
+export function recordLeaveTimestamp(): void {
+  try {
+    sessionStorage.setItem(LEAVE_TIME_KEY, Date.now().toString());
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/**
+ * Retrieves the recorded leave timestamp.
+ */
+export function getLeaveTimestamp(): number | null {
+  try {
+    const raw = sessionStorage.getItem(LEAVE_TIME_KEY);
+    return raw ? parseInt(raw, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clears the recorded leave timestamp once resumed or locked.
+ */
+export function clearLeaveTimestamp(): void {
+  try {
+    sessionStorage.removeItem(LEAVE_TIME_KEY);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/**
+ * Evaluates whether the app should lock based on the delayed auto-lock timer.
+ * Does NOT lock immediately upon leaving; instead enforces the configured delay period.
+ */
+export function shouldAutoLockOnReturn(timeoutMinutes = 2): boolean {
+  const leaveTime = getLeaveTimestamp();
+  if (!leaveTime) return false;
+
+  const elapsedMs = Date.now() - leaveTime;
+  const timeoutMs = (timeoutMinutes || 2) * 60 * 1000;
+
+  return elapsedMs >= timeoutMs;
+}
+

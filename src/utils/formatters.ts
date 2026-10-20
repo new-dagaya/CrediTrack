@@ -64,3 +64,35 @@ export function normalizeTransactionType(typeStr: string): 'Use' | 'Pay' | 'Inte
   }
   return 'Use';
 }
+
+/**
+ * Robustly parses a transaction date string (e.g., "8/11/2026", "2026-08-11", "2026/08/11")
+ * into a millisecond timestamp for chronological sorting.
+ */
+export function parseTxDate(dateStr: string, fallbackTimestamp?: number): number {
+  if (!dateStr) return fallbackTimestamp || 0;
+  
+  // Format: YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = dateStr.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10) - 1;
+    const d = parseInt(isoMatch[3], 10);
+    return new Date(y, m, d).getTime();
+  }
+
+  // Format: M/D/YYYY or MM/DD/YYYY
+  const mdyMatch = dateStr.trim().match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (mdyMatch) {
+    const m = parseInt(mdyMatch[1], 10) - 1;
+    const d = parseInt(mdyMatch[2], 10);
+    const y = parseInt(mdyMatch[3], 10);
+    return new Date(y, m, d).getTime();
+  }
+
+  const parsed = Date.parse(dateStr);
+  if (!isNaN(parsed)) return parsed;
+
+  return fallbackTimestamp || 0;
+}
+

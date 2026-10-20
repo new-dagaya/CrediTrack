@@ -1,5 +1,5 @@
 {
-  "summary": "Comprehensive full source code artifact for CrediTrack Credit Card Manager with 100% automated Google Drive & Sheets OAuth integration, automatic 'CrediTrack_Card_Manager' spreadsheet generation, real-time bi-directional synchronization, zero manual configuration (no API keys or sheet IDs needed), dual Dark/Light mode theme system, and client-side PIN security.",
-  "updatedAt": "2026-10-18T12:25:08.088166338Z",
+  "summary": "Complete updated source code for CrediTrack featuring hollow neon chart styling: chart bar fills are completely empty/transparent with glowing neon borders (neon red for expenses, neon yellow for interest/fees, and neon green for payments) with subtle outer halos. Retains all existing features including clean light mode, Google Drive/Sheets sync, PIN security, and Android 15 home-screen widget deep links.",
+  "updatedAt": "2026-10-20T07:57:57.622058933Z",
   "userFacing": true
 }

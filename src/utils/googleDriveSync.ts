@@ -1,4 +1,5 @@
 import { CardProfile, Transaction } from '../types';
+import { parseTxDate } from './formatters';
 
 export interface GoogleSpreadsheetInfo {
   spreadsheetId: string;
@@ -303,8 +304,13 @@ export async function syncAllCardsToGoogleSheet(
       syncedTabs.push(tabTitle);
 
       const cardTxs = transactionsByCard[card.id] || [];
-      // Sort chronologically
-      const sortedTxs = [...cardTxs].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      // Sort chronologically by transaction date
+      const sortedTxs = [...cardTxs].sort((a, b) => {
+        const timeA = parseTxDate(a.date, a.createdAt);
+        const timeB = parseTxDate(b.date, b.createdAt);
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      });
 
       const rows: (string | number)[][] = sortedTxs.map((tx) => [
         tx.month,
@@ -445,3 +451,117 @@ export async function ensureCardTabExists(
   await createTabsIfMissing(accessToken, spreadsheetId, [tabTitle]);
   return tabTitle;
 }
+
+/**
+ * Dynamically deletes a card's dedicated tab from the Google Sheet in Google Drive.
+ * Handles single-tab constraint by ensuring an overview tab exists if deleting the last tab.
+ */
+export async function deleteCardTabFromGoogleSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  card: CardProfile
+): Promise<{ success: boolean; error?: string }> {
+  if (!accessToken || !spreadsheetId || !card) return { success: false };
+
+  try {
+    const tabTitle = getCardTabTitle(card);
+    const existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+    const targetTab = existingTabs.find((t) => t.title.toLowerCase() === tabTitle.toLowerCase());
+
+    if (!targetTab) {
+      return { success: true }; // Tab already doesn't exist
+    }
+
+    // Google Sheets requires at least one sheet tab in a spreadsheet.
+    // If this is the only tab left, create an OVERVIEW placeholder first so deletion succeeds.
+    if (existingTabs.length === 1) {
+      await createTabsIfMissing(accessToken, spreadsheetId, ['OVERVIEW']);
+    }
+
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const res = await fetch(batchUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            deleteSheet: {
+              sheetId: targetTab.sheetId,
+            },
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.warn('Failed to delete tab from Google Sheet:', errData);
+      return { success: false, error: errData?.error?.message || `Failed to delete tab: ${res.status}` };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('deleteCardTabFromGoogleSheet error:', error);
+    return { success: false, error: error?.message || 'Failed to delete sheet tab' };
+  }
+}
+
+/**
+ * Renames an existing card tab when the user edits the card name.
+ */
+export async function renameCardTabInGoogleSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  oldCardTitle: string,
+  newCardTitle: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!accessToken || !spreadsheetId || !oldCardTitle || !newCardTitle) return { success: false };
+  if (oldCardTitle === newCardTitle) return { success: true };
+
+  try {
+    const existingTabs = await getSpreadsheetTabs(accessToken, spreadsheetId);
+    const targetTab = existingTabs.find((t) => t.title.toLowerCase() === oldCardTitle.toLowerCase());
+
+    if (!targetTab) {
+      // If old tab not found, just create the new tab
+      await createTabsIfMissing(accessToken, spreadsheetId, [newCardTitle]);
+      return { success: true };
+    }
+
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+    const res = await fetch(batchUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: targetTab.sheetId,
+                title: newCardTitle,
+              },
+              fields: 'title',
+            },
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData?.error?.message || `Failed to rename tab: ${res.status}` };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('renameCardTabInGoogleSheet error:', error);
+    return { success: false, error: error?.message || 'Failed to rename sheet tab' };
+  }
+}
+

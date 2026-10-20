@@ -14,7 +14,6 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
 
   // Group transactions by month
   const monthlyData = useMemo(() => {
-    // If it's Commercial Bank, start with the authentic baseline history from Image 2
     const map = new Map<string, { use: number; intFee: number; pay: number; count: number }>();
 
     if (isCommercial) {
@@ -28,8 +27,6 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
       });
     }
 
-    // Add or override with live transactions in the database
-    // For months that have itemized transactions, let's tally them:
     const liveMap = new Map<string, { use: number; intFee: number; pay: number; count: number }>();
     transactions.forEach((tx) => {
       const m = tx.month || 'Other';
@@ -47,12 +44,10 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
       }
     });
 
-    // Merge: For months with live transactions, use live calculation (or maximum to preserve baseline if testing)
     liveMap.forEach((val, month) => {
       map.set(month, val);
     });
 
-    // Convert map to sorted list
     const result: MonthlyBreakdownRow[] = [];
     let runningBalance = 0;
 
@@ -91,48 +86,48 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
     };
   }, [monthlyData]);
 
-    return (
+  return (
     <div className="space-y-4">
-      {/* Top Banner Matching Image 2 Header Exactly */}
-      <div className="grid grid-cols-3 gap-2.5 sm:gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md dark:shadow-xl transition-colors">
-        {/* Total Use (Red) */}
+      {/* Top Banner with Neon Numbers */}
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-4 p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-sm dark:shadow-xl transition-colors">
+        {/* Total Use (Neon Rose) */}
         <div className="text-center sm:text-left">
-          <p className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Use
           </p>
-          <p className="text-sm sm:text-lg font-bold text-rose-500 font-mono mt-0.5">
+          <p className="text-base sm:text-xl font-black text-rose-600 dark:text-rose-400 font-mono mt-0.5 drop-shadow-[0_0_8px_rgba(244,63,94,0.3)]">
             {formatCurrency(totals.totalUse)}
           </p>
         </div>
 
-        {/* Total Pay (Green) */}
-        <div className="text-center sm:text-left border-x border-slate-200 dark:border-slate-800/80 px-2 sm:px-4">
-          <p className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        {/* Total Pay (Neon Emerald) */}
+        <div className="text-center sm:text-left border-x border-slate-200/90 dark:border-slate-800/80 px-2 sm:px-4">
+          <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Pay
           </p>
-          <p className="text-sm sm:text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+          <p className="text-base sm:text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]">
             {formatCurrency(totals.totalPay)}
           </p>
         </div>
 
-        {/* Total Int & Fee (Amber) */}
+        {/* Total Int & Fee (Neon Amber) */}
         <div className="text-center sm:text-left">
-          <p className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             Total Int & Fee
           </p>
-          <p className="text-sm sm:text-lg font-bold text-amber-500 dark:text-amber-400 font-mono mt-0.5">
+          <p className="text-base sm:text-xl font-black text-amber-600 dark:text-amber-400 font-mono mt-0.5 drop-shadow-[0_0_8px_rgba(245,158,11,0.3)]">
             {formatCurrency(totals.totalInt)}
           </p>
         </div>
       </div>
 
-      {/* Monthly Payment History Table (Replica of Image 2 Left Table) */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90 shadow-md dark:shadow-xl transition-colors">
-        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/70">
-          <h3 className="text-xs font-bold text-slate-900 dark:text-white tracking-wide uppercase">
+      {/* Monthly Payment History Table */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm dark:shadow-xl transition-colors">
+        <div className="px-4 py-3 border-b border-slate-200/90 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/70">
+          <h3 className="text-xs font-bold text-slate-900 dark:text-white tracking-wide uppercase drop-shadow-[0_0_6px_rgba(16,185,129,0.25)]">
             Monthly Payment History
           </h3>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 font-mono">
             {monthlyData.length} Billing Periods
           </span>
         </div>
@@ -140,25 +135,25 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50/80 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              <tr className="bg-slate-50/80 dark:bg-slate-950/80 border-b border-slate-200/90 dark:border-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                 <th className="py-2.5 px-4 whitespace-nowrap">Month</th>
-                <th className="py-2.5 px-3.5 text-right whitespace-nowrap text-rose-500">Use (Rs.)</th>
-                <th className="py-2.5 px-3.5 text-right whitespace-nowrap text-amber-500 dark:text-amber-400">Int & Fee (Rs.)</th>
+                <th className="py-2.5 px-3.5 text-right whitespace-nowrap text-rose-600 dark:text-rose-400">Use (Rs.)</th>
+                <th className="py-2.5 px-3.5 text-right whitespace-nowrap text-amber-600 dark:text-amber-400">Int & Fee (Rs.)</th>
                 <th className="py-2.5 px-3.5 text-right whitespace-nowrap text-emerald-600 dark:text-emerald-400">Pay (Rs.)</th>
-                <th className="py-2.5 px-4 text-right whitespace-nowrap text-slate-600 dark:text-slate-300">Net Delta</th>
+                <th className="py-2.5 px-4 text-right whitespace-nowrap text-slate-700 dark:text-slate-300">Net Delta</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-xs">
               {monthlyData.map((row) => {
                 return (
-                  <tr key={row.month} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                  <tr key={row.month} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
                     {/* Month */}
-                    <td className="py-2.5 px-4 whitespace-nowrap text-slate-800 dark:text-slate-300 font-sans font-medium">
+                    <td className="py-2.5 px-4 whitespace-nowrap text-slate-800 dark:text-slate-300 font-sans font-semibold">
                       {row.month}
                     </td>
 
                     {/* Use */}
-                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap font-bold text-rose-600 dark:text-rose-500">
+                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap font-bold text-rose-600 dark:text-rose-400">
                       {row.totalUse > 0 ? formatCurrency(row.totalUse) : '-'}
                     </td>
 
@@ -168,7 +163,7 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
                     </td>
 
                     {/* Pay */}
-                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap font-bold text-emerald-700 dark:text-emerald-400">
+                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap font-bold text-emerald-600 dark:text-emerald-400">
                       {row.totalPay > 0 ? formatCurrency(row.totalPay) : '-'}
                     </td>
 
@@ -178,7 +173,7 @@ export const MonthlyBreakdown: React.FC<MonthlyBreakdownProps> = ({ cardId, tran
                         row.netChange > 0
                           ? 'text-rose-600 dark:text-rose-400'
                           : row.netChange < 0
-                          ? 'text-emerald-700 dark:text-emerald-400'
+                          ? 'text-emerald-600 dark:text-emerald-400'
                           : 'text-slate-500 dark:text-slate-400'
                       }`}
                     >

@@ -7,13 +7,13 @@ import {
   Download, 
   Upload, 
   CheckCircle2, 
-  AlertCircle,
-  X,
-  FileSpreadsheet,
-  ExternalLink,
-  RefreshCw,
-  LogOut,
-  Cloud
+  AlertCircle, 
+  X, 
+  FileSpreadsheet, 
+  ExternalLink, 
+  RefreshCw, 
+  LogOut, 
+  Cloud 
 } from 'lucide-react';
 import { CardProfile, SecurityConfig, Transaction } from '../../types';
 import { hashPin } from '../../utils/security';
@@ -87,7 +87,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
 
     if (newPinInput !== confirmPinInput) {
-      setFeedback({ type: 'error', message: 'New PIN and confirmation do not match.' });
+      setFeedback({ type: 'error', message: 'New PIN and confirmation PIN do not match.' });
       return;
     }
 
@@ -97,30 +97,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       isPinSet: true,
       pinHash: newHashed,
       pinLength: selectedPinLength,
+      lastActiveTimestamp: Date.now(),
     });
 
-    setFeedback({ type: 'success', message: 'Security PIN updated successfully!' });
+    setFeedback({ type: 'success', message: 'PIN updated successfully!' });
     setCurrentPinInput('');
     setNewPinInput('');
     setConfirmPinInput('');
   };
 
   const handleExportBackup = () => {
-    const data = {
-      version: 1,
-      timestamp: Date.now(),
+    const backupData = {
+      version: '2.0.0',
+      exportedAt: new Date().toISOString(),
       cards,
       transactionsByCard,
     };
-    const jsonStr = JSON.stringify(data, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `creditrack-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setFeedback({ type: 'success', message: 'Backup file exported successfully!' });
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `creditrack_backup_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    setFeedback({ type: 'success', message: 'JSON backup downloaded to your device!' });
   };
 
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -145,17 +145,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-800 dark:text-slate-200 transition-colors">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-t-3xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-800 dark:text-slate-200 transition-colors">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900/90">
+        <div className="px-6 py-4 border-b border-slate-200/90 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900/90">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-400/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+              <ShieldCheck className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Security & Cloud Sync</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white drop-shadow-[0_0_6px_rgba(16,185,129,0.2)]">
+                Security & Cloud Sync
+              </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">Google Drive sync and PIN protection</p>
             </div>
           </div>
@@ -172,43 +174,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           
           {feedback && (
             <div
-              className={`p-3 rounded-2xl flex items-center gap-2.5 text-xs font-medium ${
+              className={`p-3 rounded-2xl flex items-center gap-2.5 text-xs font-bold ${
                 feedback.type === 'success'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
-                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/60 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800/60 shadow-[0_0_10px_rgba(244,63,94,0.2)]'
               }`}
             >
               {feedback.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
               ) : (
-                <AlertCircle className="w-4 h-4 shrink-0" />
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               )}
               <span>{feedback.message}</span>
             </div>
           )}
 
-          {/* Section 1: Google Drive & Sheets Sync (Zero manual config) */}
-          <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+          {/* Section 1: Google Drive & Sheets Sync */}
+          <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800">
             <div className="flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
               <h4 className="text-xs font-bold text-slate-900 dark:text-white">Google Drive & Sheets Integration</h4>
-              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/40 px-2 py-0.5 rounded-full ml-auto">
+              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400/50 px-2 py-0.5 rounded-full ml-auto shadow-[0_0_8px_rgba(16,185,129,0.2)]">
                 Automated
               </span>
             </div>
 
             {googleUser ? (
               <div className="space-y-3 pt-1">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800">
                   <div className="flex items-center gap-2.5">
                     {googleUser.photoURL ? (
                       <img
                         src={googleUser.photoURL}
                         alt="User"
-                        className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700"
+                        className="w-8 h-8 rounded-full border border-emerald-400/50 shadow-xs"
                       />
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-emerald-500 text-slate-950 font-black text-xs flex items-center justify-center">
                         {(googleUser.displayName || googleUser.email || 'G')[0].toUpperCase()}
                       </div>
                     )}
@@ -216,7 +218,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <p className="text-xs font-bold text-slate-900 dark:text-white">
                         {googleUser.displayName || googleUser.email}
                       </p>
-                      <p className="text-[11px] text-slate-500 font-mono">
+                      <p className="text-[11px] text-slate-500 font-mono font-medium">
                         {spreadsheetInfo?.title || 'CrediTrack_Card_Manager'}
                       </p>
                     </div>
@@ -227,9 +229,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       href={spreadsheetInfo.webViewLink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white hover:bg-emerald-50/80 dark:bg-slate-800 dark:hover:bg-slate-700 border border-emerald-400/50 text-xs font-bold text-emerald-700 dark:text-emerald-300 transition-all shadow-[0_0_10px_rgba(16,185,129,0.2)] active:scale-95"
                     >
-                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <ExternalLink className="w-3.5 h-3.5" />
                       <span>Open Sheet</span>
                     </a>
                   )}
@@ -240,7 +242,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="button"
                     onClick={onSyncGoogleNow}
                     disabled={isSyncingGoogle}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all cursor-pointer disabled:opacity-50"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingGoogle ? 'animate-spin' : ''}`} />
                     <span>{isSyncingGoogle ? 'Syncing...' : 'Sync All Cards Now'}</span>
@@ -249,7 +251,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={onSignOutGoogle}
-                    className="px-3 py-2.5 rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-rose-600 dark:text-rose-400 transition-colors cursor-pointer"
+                    className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-rose-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/90 dark:border-slate-800 text-xs font-bold text-rose-600 dark:text-rose-400 transition-colors cursor-pointer active:scale-95"
                   >
                     Disconnect
                   </button>
@@ -257,18 +259,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             ) : (
               <div className="space-y-2 pt-1">
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
                   Connect your Google account to automatically generate your{' '}
-                  <strong className="text-slate-900 dark:text-white">CrediTrack_Card_Manager</strong>{' '}
-                  spreadsheet in Google Drive. No manual API keys or sheet IDs needed.
+                  <strong className="text-slate-900 dark:text-white font-bold">CrediTrack_Card_Manager</strong>{' '}
+                  spreadsheet in Google Drive with separate sheets per card.
                 </p>
                 <button
                   type="button"
                   onClick={onSignInGoogle}
                   disabled={isConnectingGoogle}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] cursor-pointer disabled:opacity-50 transition-all"
                 >
-                  <Cloud className="w-4 h-4" />
+                  <Cloud className="w-4 h-4 stroke-[2.5]" />
                   <span>{isConnectingGoogle ? 'Connecting...' : 'Connect Google Drive & Sheets'}</span>
                 </button>
               </div>
@@ -276,24 +278,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Section 2: Change PIN */}
-          <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+          <div className="space-y-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800">
             <div className="flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <KeyRound className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
               <h4 className="text-xs font-bold text-slate-900 dark:text-white">Change Security PIN</h4>
             </div>
 
             <form onSubmit={handleChangePin} className="space-y-3 pt-1">
-              {/* Length choice */}
+              {/* Length choice with Neon Buttons */}
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-600 dark:text-slate-400 font-medium">PIN Length:</span>
+                <span className="text-slate-600 dark:text-slate-400 font-bold">PIN Length:</span>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setSelectedPinLength(4)}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       selectedPinLength === 4
-                        ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
-                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        ? 'bg-emerald-500 text-slate-950 font-black shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     4 Digits
@@ -301,10 +303,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setSelectedPinLength(6)}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       selectedPinLength === 6
-                        ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
-                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        ? 'bg-emerald-500 text-slate-950 font-black shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     6 Digits
@@ -314,7 +316,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {securityConfig.isPinSet && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Current PIN</label>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Current PIN</label>
                   <input
                     type="password"
                     inputMode="numeric"
@@ -322,14 +324,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={currentPinInput}
                     onChange={(e) => setCurrentPinInput(e.target.value.replace(/\D/g, ''))}
                     placeholder="Enter current PIN"
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                   />
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">New PIN</label>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">New PIN</label>
                   <input
                     type="password"
                     inputMode="numeric"
@@ -337,12 +339,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={newPinInput}
                     onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, ''))}
                     placeholder={`${selectedPinLength} digits`}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Confirm New PIN</label>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Confirm New PIN</label>
                   <input
                     type="password"
                     inputMode="numeric"
@@ -350,28 +352,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={confirmPinInput}
                     onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, ''))}
                     placeholder="Re-enter"
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 shadow-2xs"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all cursor-pointer"
               >
                 Update Security PIN
               </button>
             </form>
           </div>
 
-          {/* Section 3: Auto-Lock Inactivity */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
+          {/* Section 3: Auto-Lock Inactivity Timeout */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 space-y-2.5">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
               <h4 className="text-xs font-bold text-slate-900 dark:text-white">Auto-Lock Inactivity Timeout</h4>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Lock CrediTrack automatically after inactivity:
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+              Lock CrediTrack automatically after leaving or minimizing:
             </p>
             <div className="grid grid-cols-4 gap-2">
               {[1, 5, 15, 60].map((mins) => (
@@ -384,10 +386,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       lockTimeoutMinutes: mins,
                     })
                   }
-                  className={`py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+                  className={`py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
                     securityConfig.lockTimeoutMinutes === mins
-                      ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
-                      : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      ? 'bg-emerald-500 text-slate-950 font-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                      : 'bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   {mins === 60 ? '1 hour' : `${mins} min`}
@@ -397,20 +399,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Section 4: Data Backup & Reset */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/90 dark:border-slate-800 space-y-3">
             <h4 className="text-xs font-bold text-slate-900 dark:text-white">Local Data Management & JSON Backup</h4>
             
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={handleExportBackup}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors shadow-2xs cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white hover:bg-emerald-50/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/90 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 transition-all shadow-xs hover:border-emerald-400/50 hover:shadow-[0_0_10px_rgba(16,185,129,0.2)] cursor-pointer active:scale-95"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>Export JSON</span>
               </button>
 
-              <label className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors cursor-pointer shadow-2xs">
+              <label className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-white hover:bg-emerald-50/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/90 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 transition-all shadow-xs hover:border-emerald-400/50 hover:shadow-[0_0_10px_rgba(16,185,129,0.2)] cursor-pointer active:scale-95">
                 <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>Restore JSON</span>
                 <input
@@ -427,21 +429,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowResetConfirm(true)}
-                  className="text-xs text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1.5 font-medium cursor-pointer"
+                  className="text-xs text-rose-600 dark:text-rose-400 hover:underline flex items-center gap-1.5 font-bold cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Reset All Cards to Initial Data</span>
                 </button>
               ) : (
-                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/40 rounded-xl space-y-2">
-                  <p className="text-xs text-rose-800 dark:text-rose-300">
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800/40 rounded-xl space-y-2">
+                  <p className="text-xs text-rose-800 dark:text-rose-300 font-medium">
                     Are you sure? This restores the original Commercial Bank and Sampath Bank demo profiles and transactions.
                   </p>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => setShowResetConfirm(false)}
-                      className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs cursor-pointer"
+                      className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs cursor-pointer active:scale-95"
                     >
                       Cancel
                     </button>
@@ -452,7 +454,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         setShowResetConfirm(false);
                         setFeedback({ type: 'success', message: 'Reset to initial cards completed!' });
                       }}
-                      className="px-3 py-1 bg-rose-600 text-white font-semibold rounded-lg text-xs cursor-pointer"
+                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs cursor-pointer shadow-[0_0_10px_rgba(244,63,94,0.4)] active:scale-95"
                     >
                       Confirm Reset
                     </button>
@@ -465,10 +467,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 flex justify-end">
+        <div className="p-4 border-t border-slate-200/90 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 flex justify-end">
           <button
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-800 dark:text-white transition-colors cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-white transition-colors cursor-pointer active:scale-95"
           >
             Close
           </button>

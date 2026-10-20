@@ -1,658 +1,596 @@
-# CrediTrack: Personal Credit Card Manager & Automated Google Drive OAuth Sync
+# CrediTrack — Complete Updated Source Code
 
-## Architecture Overview
-CrediTrack is a personal finance and credit card tracker featuring **100% automated Google Drive and Google Sheets synchronization**. Users no longer need to obtain Google Cloud API keys, deploy manual Apps Scripts, or copy Spreadsheet IDs.
-
-### Key Capabilities
-1. **Seamless Google Drive OAuth Sign-In**:
-   - Integrated with Firebase Auth and Google Workspace scopes (`drive.file` and `spreadsheets`).
-   - Secure in-memory OAuth access token management following the principle of least privilege.
-2. **Automated Spreadsheet Creation**:
-   - Automatically searches for or creates a spreadsheet named `CrediTrack_Card_Manager` directly inside the user's Google Drive.
-   - Initialized with standard column headers: `Month`, `Date`, `Type`, `Amount`, `Balance`, `Description`, and `Card Name`.
-3. **Real-Time Data Synchronization**:
-   - Every transaction added, edited, or deleted is synchronized in real time to the user's `CrediTrack_Card_Manager` sheet.
-   - Includes full-sync reconciliation with explicit user confirmation for data-modifying operations.
-4. **Ergonomic UI**:
-   - Elevated floating action button (FAB) positioned above the bottom navigation bar.
-   - Single consolidated "Add New Card" workflow on the dashboard.
-   - Prominent theme toggle switch in the header supporting both dark mode and light mode.
-   - Local PIN security with SHA-256 hashing and automatic inactivity timeout lock.
+## Overview of Chart Neon Styling Updates
+- **Hollow Neon Chart Bars**: Removed all middle fills (`bg-transparent`), leaving the inside of bars completely empty and transparent.
+- **Neon Border Styling**:
+  - **Expense (`Use`)**: Bright Neon Red (`border-2 border-red-500 dark:border-red-400` with subtle glow `shadow-[0_0_8px_rgba(239,68,68,0.45)]`)
+  - **Interest & Fees (`Int & Fee`)**: Bright Neon Yellow (`border-2 border-yellow-400 dark:border-yellow-300` with subtle glow `shadow-[0_0_8px_rgba(250,204,21,0.45)]`)
+  - **Payments (`Pay`)**: Bright Neon Green (`border-2 border-emerald-400 dark:border-emerald-300` with subtle glow `shadow-[0_0_8px_rgba(52,211,153,0.45)]`)
+- **Dual Chart Support**: Styled both horizontal bars and vertical column layouts in both `NeonChart.tsx` (Dashboard) and `AnalyticsChart.tsx` (Card Details).
+- **Light & Dark Mode**: Pristine light mode colors with no misplaced dark surfaces, and vivid neon glows in dark mode.
 
 ---
 
-## File Tree
-```
-├── firebase-applet-config.json
-├── package.json
-├── index.html
-├── src/
-│   ├── main.tsx
-│   ├── index.css
-│   ├── App.tsx
-│   ├── types/
-│   │   └── index.ts
-│   ├── data/
-│   │   └── initialData.ts
-│   ├── utils/
-│   │   ├── formatters.ts
-│   │   ├── security.ts
-│   │   ├── googleAuth.ts
-│   │   ├── googleDriveSync.ts
-│   │   └── sheetsSync.ts
-│   └── components/
-│       ├── common/
-│       │   ├── Header.tsx
-│       │   ├── BottomNav.tsx
-│       │   └── GoogleDriveSyncBanner.tsx
-│       ├── security/
-│       │   └── PinScreen.tsx
-│       ├── dashboard/
-│       │   ├── Dashboard.tsx
-│       │   └── AddCardModal.tsx
-│       ├── tracker/
-│       │   ├── CardDetailView.tsx
-│       │   ├── TransactionTable.tsx
-│       │   ├── TransactionModal.tsx
-│       │   ├── MonthlyBreakdown.tsx
-│       │   └── AnalyticsChart.tsx
-│       ├── sheets/
-│       │   ├── ImportSheetModal.tsx
-│       │   └── SheetsOnboardingGuide.tsx
-│       └── settings/
-│           └── SettingsModal.tsx
-```
+## 1. `src/index.css`
 
----
+```css
+@import "tailwindcss";
 
-## Complete Source Code Files
+@custom-variant dark (&:where(.dark, .dark *));
+@variant dark (&:where(.dark, .dark *));
 
-### 1. `src/utils/googleAuth.ts`
-```typescript
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  User, 
-  signOut 
-} from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
-
-// Initialize Firebase App instance safely (singleton)
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
-
-// Google Workspace OAuth Scopes configured for CrediTrack
-export const SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/spreadsheets',
-];
-
-const provider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => provider.addScope(scope));
-provider.setCustomParameters({
-  prompt: 'select_account',
-});
-
-// In-memory token cache (never stored in localStorage)
-let cachedAccessToken: string | null = null;
-let isSigningIn = false;
-
-export const initAuth = (
-  onAuthSuccess?: (user: User, token: string | null) => void,
-  onAuthFailure?: () => void
-) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      if (onAuthSuccess) {
-        onAuthSuccess(user, cachedAccessToken);
-      }
-    } else {
-      cachedAccessToken = null;
-      if (onAuthFailure) {
-        onAuthFailure();
-      }
-    }
-  });
-};
-
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    
-    if (!credential?.accessToken) {
-      throw new Error('Failed to retrieve Google OAuth access token.');
-    }
-
-    cachedAccessToken = credential.accessToken;
-    return {
-      user: result.user,
-      accessToken: cachedAccessToken,
-    };
-  } catch (error: any) {
-    console.error('Google Sign-in error:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
-  }
-};
-
-export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
-};
-
-export const googleSignOut = async (): Promise<void> => {
-  await signOut(auth);
-  cachedAccessToken = null;
-};
-
-export const getCurrentUser = (): User | null => {
-  return auth.currentUser;
-};
-```
-
----
-
-### 2. `src/utils/googleDriveSync.ts`
-```typescript
-import { CardProfile, Transaction } from '../types';
-
-export interface GoogleSpreadsheetInfo {
-  spreadsheetId: string;
-  webViewLink: string;
-  title: string;
-  lastSyncedAt?: number;
-  lastSyncStatus?: 'idle' | 'syncing' | 'success' | 'error';
-  lastError?: string;
-}
-
-export const SPREADSHEET_NAME = 'CrediTrack_Card_Manager';
-export const MAIN_SHEET_TITLE = 'All Transactions';
-export const STANDARD_HEADERS = [
-  'Month',
-  'Date',
-  'Type',
-  'Amount',
-  'Balance',
-  'Description',
-  'Card Name',
-];
-
-export async function findOrCreateSpreadsheet(
-  accessToken: string
-): Promise<{ spreadsheetId: string; webViewLink: string; isNew: boolean }> {
-  if (!accessToken) {
-    throw new Error('Google OAuth access token is required.');
+@layer base {
+  :root {
+    color-scheme: light;
   }
 
-  // Search Google Drive using files.list
-  const query = encodeURIComponent(
-    `name = '${SPREADSHEET_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`
-  );
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)&pageSize=5`;
-
-  const searchRes = await fetch(searchUrl, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!searchRes.ok) {
-    const errorData = await searchRes.json().catch(() => ({}));
-    throw new Error(
-      errorData?.error?.message || `Google Drive API error: ${searchRes.status}`
-    );
+  .dark {
+    color-scheme: dark;
   }
 
-  const searchData = await searchRes.json();
-
-  if (searchData.files && searchData.files.length > 0) {
-    const existing = searchData.files[0];
-    return {
-      spreadsheetId: existing.id,
-      webViewLink:
-        existing.webViewLink ||
-        `https://docs.google.com/spreadsheets/d/${existing.id}/edit`,
-      isNew: false,
-    };
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
 
-  // Not found: Create new Google Sheet directly via Google Sheets API
-  const createUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
-  const createPayload = {
-    properties: {
-      title: SPREADSHEET_NAME,
-    },
-    sheets: [
-      {
-        properties: {
-          title: MAIN_SHEET_TITLE,
-          gridProperties: {
-            frozenRowCount: 1,
-            rowCount: 1000,
-            columnCount: 10,
-          },
-        },
-      },
-    ],
-  };
-
-  const createRes = await fetch(createUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(createPayload),
-  });
-
-  if (!createRes.ok) {
-    const errorData = await createRes.json().catch(() => ({}));
-    throw new Error(
-      errorData?.error?.message || `Failed to create Google Sheet: ${createRes.status}`
-    );
+  input, textarea, select {
+    user-select: auto;
+    -webkit-user-select: auto;
   }
 
-  const createData = await createRes.json();
-  const newSheetId = createData.spreadsheetId;
-  const webViewLink =
-    createData.spreadsheetUrl ||
-    `https://docs.google.com/spreadsheets/d/${newSheetId}/edit`;
-
-  // Write required column headers: Month, Date, Type, Amount, Balance, Description
-  const headerRange = encodeURIComponent(`'${MAIN_SHEET_TITLE}'!A1:G1`);
-  const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${newSheetId}/values/${headerRange}?valueInputOption=USER_ENTERED`;
-
-  await fetch(headerUrl, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      values: [STANDARD_HEADERS],
-    }),
-  });
-
-  return {
-    spreadsheetId: newSheetId,
-    webViewLink,
-    isNew: true,
-  };
-}
-
-export async function syncAllCardsToGoogleSheet(
-  accessToken: string,
-  spreadsheetId: string,
-  cards: CardProfile[],
-  transactionsByCard: Record<string, Transaction[]>
-): Promise<{ success: boolean; count: number; error?: string }> {
-  if (!accessToken || !spreadsheetId) {
-    return { success: false, count: 0, error: 'Missing access credentials or Sheet ID.' };
-  }
-
-  try {
-    const cardMap = new Map(cards.map((c) => [c.id, c.name]));
-    const allRows: (string | number)[][] = [];
-
-    const allTransactions: { tx: Transaction; cardName: string }[] = [];
-    Object.entries(transactionsByCard).forEach(([cardId, txs]) => {
-      const cardName = cardMap.get(cardId) || 'Credit Card';
-      txs.forEach((tx) => {
-        allTransactions.push({ tx, cardName });
-      });
-    });
-
-    allTransactions.sort((a, b) => (a.tx.createdAt || 0) - (b.tx.createdAt || 0));
-
-    allTransactions.forEach(({ tx, cardName }) => {
-      allRows.push([
-        tx.month,
-        tx.date,
-        tx.type,
-        tx.amount,
-        tx.balance,
-        tx.description,
-        cardName,
-      ]);
-    });
-
-    const clearRange = encodeURIComponent(`'${MAIN_SHEET_TITLE}'!A2:Z2000`);
-    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${clearRange}:clear`;
-    await fetch(clearUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const headerRange = encodeURIComponent(`'${MAIN_SHEET_TITLE}'!A1:G1`);
-    const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${headerRange}?valueInputOption=USER_ENTERED`;
-    await fetch(headerUrl, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        values: [STANDARD_HEADERS],
-      }),
-    });
-
-    if (allRows.length > 0) {
-      const writeRange = encodeURIComponent(`'${MAIN_SHEET_TITLE}'!A2`);
-      const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${writeRange}?valueInputOption=USER_ENTERED`;
-
-      const writeRes = await fetch(writeUrl, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          values: allRows,
-        }),
-      });
-
-      if (!writeRes.ok) {
-        const errorData = await writeRes.json().catch(() => ({}));
-        throw new Error(errorData?.error?.message || `Failed to write transactions: ${writeRes.status}`);
-      }
-    }
-
-    return {
-      success: true,
-      count: allRows.length,
-    };
-  } catch (error: any) {
-    console.error('Google Sheets Sync error:', error);
-    return {
-      success: false,
-      count: 0,
-      error: error?.message || 'Sync failed',
-    };
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
   }
 }
 
-export async function appendTransactionToGoogleSheet(
-  accessToken: string,
-  spreadsheetId: string,
-  tx: Transaction,
-  cardName: string
-): Promise<{ success: boolean; error?: string }> {
-  if (!accessToken || !spreadsheetId) return { success: false };
+/* ============================================================
+   NEON BUTTONS & GLOW UTILITIES (ACROSS ALL SURFACES)
+   ============================================================ */
 
-  try {
-    const appendRange = encodeURIComponent(`'${MAIN_SHEET_TITLE}'!A:G`);
-    const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${appendRange}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+/* Neon Emerald Primary Buttons */
+.neon-btn-emerald {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid rgba(52, 211, 153, 0.6);
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4), 0 2px 4px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neon-btn-emerald:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  box-shadow: 0 0 22px rgba(16, 185, 129, 0.65), 0 4px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+.neon-btn-emerald:active {
+  transform: scale(0.97);
+}
 
-    const row = [
-      tx.month,
-      tx.date,
-      tx.type,
-      tx.amount,
-      tx.balance,
-      tx.description,
-      cardName,
-    ];
+/* Neon Cyan Secondary / Accent Buttons */
+.neon-btn-cyan {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  color: #ffffff;
+  border: 1px solid rgba(103, 232, 249, 0.6);
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.4), 0 2px 4px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neon-btn-cyan:hover {
+  background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 100%);
+  box-shadow: 0 0 22px rgba(6, 182, 212, 0.65), 0 4px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+.neon-btn-cyan:active {
+  transform: scale(0.97);
+}
 
-    const res = await fetch(appendUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        values: [row],
-      }),
-    });
+/* Neon Rose / Danger Buttons */
+.neon-btn-rose {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  color: #ffffff;
+  border: 1px solid rgba(251, 113, 133, 0.6);
+  box-shadow: 0 0 14px rgba(244, 63, 94, 0.4), 0 2px 4px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neon-btn-rose:hover {
+  background: linear-gradient(135deg, #fb7185 0%, #f43f5e 100%);
+  box-shadow: 0 0 22px rgba(244, 63, 94, 0.65), 0 4px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+.neon-btn-rose:active {
+  transform: scale(0.97);
+}
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData?.error?.message || `Failed to append: ${res.status}`);
-    }
+/* Neon Amber / Warning Buttons */
+.neon-btn-amber {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #ffffff;
+  border: 1px solid rgba(252, 211, 77, 0.6);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.4), 0 2px 4px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neon-btn-amber:hover {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 0 22px rgba(245, 158, 11, 0.65), 0 4px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+.neon-btn-amber:active {
+  transform: scale(0.97);
+}
 
-    return { success: true };
-  } catch (error: any) {
-    console.error('Failed to append transaction to Google Sheet:', error);
-    return { success: false, error: error?.message };
-  }
+/* Outlined Neon Buttons */
+.neon-btn-outline-emerald {
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: 1.5px solid rgba(16, 185, 129, 0.45);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.18);
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+.neon-btn-outline-emerald:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.8);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.35);
+}
+.dark .neon-btn-outline-emerald {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.5);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+}
+
+.neon-btn-outline-cyan {
+  background: rgba(6, 182, 212, 0.08);
+  color: #0891b2;
+  border: 1.5px solid rgba(6, 182, 212, 0.45);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.18);
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+.neon-btn-outline-cyan:hover {
+  background: rgba(6, 182, 212, 0.18);
+  border-color: rgba(6, 182, 212, 0.8);
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.35);
+}
+.dark .neon-btn-outline-cyan {
+  color: #22d3ee;
+  border-color: rgba(34, 211, 238, 0.5);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
+}
+
+/* Luminous Neon Typography Glows */
+.neon-text-emerald {
+  color: #059669;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+.dark .neon-text-emerald {
+  color: #34d399;
+  text-shadow: 0 0 14px rgba(52, 211, 153, 0.65);
+}
+
+.neon-text-cyan {
+  color: #0891b2;
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.25);
+}
+.dark .neon-text-cyan {
+  color: #22d3ee;
+  text-shadow: 0 0 14px rgba(34, 211, 238, 0.65);
+}
+
+.neon-text-rose {
+  color: #e11d48;
+  text-shadow: 0 0 8px rgba(244, 63, 94, 0.25);
+}
+.dark .neon-text-rose {
+  color: #fb7185;
+  text-shadow: 0 0 14px rgba(251, 113, 133, 0.65);
+}
+
+.neon-text-amber {
+  color: #d97706;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.25);
+}
+.dark .neon-text-amber {
+  color: #fbbf24;
+  text-shadow: 0 0 14px rgba(251, 191, 36, 0.65);
+}
+
+/* ============================================================
+   HOLLOW NEON CHART BAR BORDER UTILITIES (EMPTY FILLS)
+   ============================================================ */
+
+.neon-chart-bar-expense {
+  background-color: transparent !important;
+  border: 2px solid #ef4444 !important;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.45);
+}
+
+.neon-chart-bar-interest {
+  background-color: transparent !important;
+  border: 2px solid #facc15 !important;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.45);
+}
+
+.neon-chart-bar-payment {
+  background-color: transparent !important;
+  border: 2px solid #34d399 !important;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.45);
+}
+
+/* Light / Dark Mode Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0.5rem);
 }
 ```
 
 ---
 
-### 3. `src/components/common/GoogleDriveSyncBanner.tsx`
+## 2. `src/components/dashboard/NeonChart.tsx`
+
 ```tsx
-import React, { useState } from 'react';
-import { 
-  FileSpreadsheet, 
-  ExternalLink, 
-  RefreshCw, 
-  CheckCircle2, 
-  LogOut, 
-  Cloud 
-} from 'lucide-react';
-import { GoogleSpreadsheetInfo } from '../../utils/googleDriveSync';
+import React, { useState, useMemo } from 'react';
+import { BarChart3, AlignLeft, LayoutGrid, Calendar } from 'lucide-react';
+import { CardProfile, Transaction } from '../../types';
+import { COMMERCIAL_BANK_MONTHLY_HISTORY } from '../../data/initialData';
+import { formatCurrency } from '../../utils/formatters';
 
-interface GoogleDriveSyncBannerProps {
-  user: {
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-  } | null;
-  sheetInfo: GoogleSpreadsheetInfo | null;
-  isConnecting: boolean;
-  isSyncing: boolean;
-  onSignIn: () => void;
-  onSignOut: () => void;
-  onSyncNow: () => void;
-  className?: string;
+interface NeonChartProps {
+  cards: CardProfile[];
+  transactionsByCard: Record<string, Transaction[]>;
 }
 
-export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
-  user,
-  sheetInfo,
-  isConnecting,
-  isSyncing,
-  onSignIn,
-  onSignOut,
-  onSyncNow,
-  className = '',
-}) => {
-  const [showConfirmSync, setShowConfirmSync] = useState(false);
+export const NeonChart: React.FC<NeonChartProps> = ({ cards, transactionsByCard }) => {
+  const [selectedCardFilter, setSelectedCardFilter] = useState<string>('ALL');
+  const [timeRange, setTimeRange] = useState<'6m' | '12m' | 'all'>('all');
+  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [activeTooltip, setActiveTooltip] = useState<{
+    month: string;
+    use: number;
+    intFee: number;
+    pay: number;
+  } | null>(null);
 
-  const GoogleGIcon = () => (
-    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-      <path
-        fill="#4285F4"
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-      />
-    </svg>
-  );
+  // Compile monthly data across all or selected card
+  const chartData = useMemo(() => {
+    const map = new Map<string, { use: number; intFee: number; pay: number }>();
 
-  if (!user) {
-    return (
-      <div
-        className={`p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-cyan-500/10 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-slate-900 border border-emerald-500/20 dark:border-emerald-500/30 shadow-xs ${className}`}
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-800 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
-              <Cloud className="w-5 h-5 stroke-[2.2]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Automated Google Drive & Sheets Sync
-                </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60">
-                  Zero Manual Config
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
-                Sign in with Google once. CrediTrack will automatically generate a{' '}
-                <strong className="text-slate-900 dark:text-white font-semibold">
-                  CrediTrack_Card_Manager
-                </strong>{' '}
-                spreadsheet directly inside your Google Drive with all standard columns and keep all card records synced in real-time.
-              </p>
-            </div>
+    // Seed commercial bank monthly history if Commercial Bank is included
+    if (selectedCardFilter === 'ALL' || selectedCardFilter === 'card-commercial-bank') {
+      COMMERCIAL_BANK_MONTHLY_HISTORY.forEach((item) => {
+        map.set(item.month, {
+          use: item.use,
+          intFee: item.intFee,
+          pay: item.pay,
+        });
+      });
+    }
+
+    // Merge live transactions
+    const cardsToProcess = selectedCardFilter === 'ALL' 
+      ? cards 
+      : cards.filter(c => c.id === selectedCardFilter);
+
+    cardsToProcess.forEach((card) => {
+      const txs = transactionsByCard[card.id] || [];
+      txs.forEach((tx) => {
+        const m = tx.month || 'Other';
+        if (!map.has(m)) {
+          map.set(m, { use: 0, intFee: 0, pay: 0 });
+        }
+        const cur = map.get(m)!;
+        if (tx.type === 'Pay') {
+          cur.pay += tx.amount;
+        } else if (tx.type === 'Interest/Fee') {
+          cur.intFee += tx.amount;
+        } else {
+          cur.use += tx.amount;
+        }
+      });
+    });
+
+    let list = Array.from(map.entries()).map(([month, vals]) => ({
+      month,
+      use: Math.round(vals.use * 100) / 100,
+      intFee: Math.round(vals.intFee * 100) / 100,
+      pay: Math.round(vals.pay * 100) / 100,
+    }));
+
+    if (timeRange === '6m') {
+      list = list.slice(-6);
+    } else if (timeRange === '12m') {
+      list = list.slice(-12);
+    }
+
+    return list;
+  }, [cards, transactionsByCard, selectedCardFilter, timeRange]);
+
+  // Max value for scaling
+  const maxValue = useMemo(() => {
+    let max = 10000;
+    chartData.forEach((d) => {
+      if (d.use > max) max = d.use;
+      if (d.pay > max) max = d.pay;
+      if (d.intFee > max) max = d.intFee;
+    });
+    return Math.ceil(max / 50000) * 50000 || 200000;
+  }, [chartData]);
+
+  const tickMarks = [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
+
+  return (
+    <div className="space-y-4">
+      {/* Neon Header & Controls Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-2xl transition-colors">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-cyan-50 dark:bg-cyan-950/80 border border-cyan-500/40 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shadow-[0_0_14px_rgba(6,182,212,0.25)]">
+            <BarChart3 className="w-5 h-5 stroke-[2.2]" />
+          </div>
+          <div>
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-1.5 drop-shadow-[0_0_6px_rgba(6,182,212,0.2)]">
+              <span>Monthly Payment & Usage Analytics</span>
+              <span className="text-[10px] text-cyan-700 dark:text-cyan-400 font-mono font-medium">['Total Use' vs 'Total Pay' vs 'Interest']</span>
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Interactive monthly trends with real-time balance calculations
+            </p>
+          </div>
+        </div>
+
+        {/* Neon Control Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Card Filter Selector */}
+          <div className="relative">
+            <select
+              value={selectedCardFilter}
+              onChange={(e) => setSelectedCardFilter(e.target.value)}
+              className="appearance-none bg-white dark:bg-slate-900 border border-cyan-500/40 hover:border-cyan-500 text-cyan-800 dark:text-cyan-300 text-xs rounded-xl px-3 py-1.5 pr-7 focus:outline-none shadow-[0_0_10px_rgba(6,182,212,0.15)] transition-all cursor-pointer font-bold"
+            >
+              <option value="ALL">All Cards Combined</option>
+              {cards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="shrink-0 flex items-center">
+          {/* Time Range Neon Button Group */}
+          <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/90 dark:border-slate-800">
+            {(['6m', '12m', 'all'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTimeRange(t)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer active:scale-95 ${
+                  timeRange === t
+                    ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-transparent'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Orientation Toggle Neon Buttons */}
+          <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/90 dark:border-slate-800">
             <button
-              onClick={onSignIn}
-              disabled={isConnecting}
               type="button"
-              className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-600 font-semibold text-xs transition-all shadow-sm active:scale-95 disabled:opacity-60 cursor-pointer"
+              onClick={() => setOrientation('horizontal')}
+              title="Horizontal Neon Bars"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer active:scale-95 ${
+                orientation === 'horizontal'
+                  ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-transparent'
+              }`}
             >
-              {isConnecting ? (
-                <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
-              ) : (
-                <GoogleGIcon />
-              )}
-              <span>{isConnecting ? 'Connecting...' : 'Sign in with Google'}</span>
+              <AlignLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrientation('vertical')}
+              title="Vertical Neon Columns"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer active:scale-95 ${
+                orientation === 'vertical'
+                  ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-transparent'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
       </div>
-    );
-  }
 
-  return (
-    <div
-      className={`p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs transition-colors ${className}`}
-    >
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {user.photoURL ? (
-            <img
-              src={user.photoURL}
-              alt={user.displayName || 'User'}
-              className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-700 object-cover shadow-2xs"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold text-sm flex items-center justify-center">
-              {(user.displayName || user.email || 'G')[0].toUpperCase()}
-            </div>
-          )}
+      {/* Main Chart Canvas */}
+      <div className="p-5 sm:p-6 rounded-3xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800/90 shadow-sm dark:shadow-2xl relative overflow-hidden transition-colors">
+        {/* Neon Outline Legend */}
+        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 pb-4 border-b border-slate-200 dark:border-slate-800 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-red-500 dark:border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-medium text-xs">
+              Total Use <strong className="text-red-500 dark:text-red-400 font-bold">(Neon Red Expense)</strong>
+            </span>
+          </div>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                {user.displayName || user.email}
-              </span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/40 px-2 py-0.5 rounded-full">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>Google Drive Connected</span>
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-yellow-400 dark:border-yellow-300 shadow-[0_0_8px_rgba(250,204,21,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-medium text-xs">
+              Interest & Fee <strong className="text-yellow-600 dark:text-yellow-400 font-bold">(Neon Yellow Interest)</strong>
+            </span>
+          </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="font-mono text-slate-700 dark:text-slate-300 font-medium">
-                {sheetInfo?.title || 'CrediTrack_Card_Manager'}
+          <div className="flex items-center gap-2">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-emerald-400 dark:border-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-medium text-xs">
+              Total Pay <strong className="text-emerald-600 dark:text-emerald-400 font-bold">(Neon Green Payment)</strong>
+            </span>
+          </div>
+        </div>
+
+        {/* Selected Tooltip */}
+        {activeTooltip && (
+          <div className="my-3 p-3 bg-slate-50 dark:bg-slate-900/95 border border-cyan-500/40 shadow-[0_0_14px_rgba(6,182,212,0.25)] rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs animate-fadeIn">
+            <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+              <span>{activeTooltip.month}</span>
+            </span>
+            <div className="flex items-center gap-4 font-mono text-[11px] sm:text-xs">
+              <span className="text-red-500 dark:text-red-400">
+                Use: <strong className="text-slate-900 dark:text-white">Rs. {formatCurrency(activeTooltip.use)}</strong>
               </span>
-              {sheetInfo?.lastSyncedAt && (
-                <>
-                  <span>•</span>
-                  <span>
-                    Synced {new Date(sheetInfo.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </>
+              {activeTooltip.intFee > 0 && (
+                <span className="text-yellow-600 dark:text-yellow-400">
+                  Int & Fee: <strong className="text-slate-900 dark:text-white">Rs. {formatCurrency(activeTooltip.intFee)}</strong>
+                </span>
               )}
+              <span className="text-emerald-600 dark:text-emerald-400">
+                Pay: <strong className="text-slate-900 dark:text-white">Rs. {formatCurrency(activeTooltip.pay)}</strong>
+              </span>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-          {sheetInfo?.webViewLink && (
-            <a
-              href={sheetInfo.webViewLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors shadow-2xs"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Open in Google Sheets</span>
-            </a>
-          )}
+        {/* Horizontal Neon Outline Bars (Empty fill, neon glowing borders) */}
+        {orientation === 'horizontal' ? (
+          <div className="space-y-4 pt-4">
+            <div className="flex justify-between pl-20 sm:pl-28 text-[10px] text-slate-400 dark:text-slate-500 font-mono border-b border-slate-200 dark:border-slate-800 pb-1">
+              {tickMarks.map((tick, i) => (
+                <span key={i} className="text-center">
+                  {tick === 0 ? 'Rs. 0' : `${Math.round(tick / 1000)}k`}
+                </span>
+              ))}
+            </div>
 
-          <button
-            type="button"
-            onClick={() => setShowConfirmSync(true)}
-            disabled={isSyncing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 stroke-[2.5] ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-          </button>
+            <div className="space-y-3.5">
+              {chartData.map((d) => {
+                const usePct = (d.use / maxValue) * 100;
+                const intPct = (d.intFee / maxValue) * 100;
+                const payPct = (d.pay / maxValue) * 100;
 
-          <button
-            type="button"
-            onClick={onSignOut}
-            title="Sign out from Google Drive"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-          </button>
-        </div>
+                return (
+                  <div
+                    key={d.month}
+                    onMouseEnter={() => setActiveTooltip(d)}
+                    onClick={() => setActiveTooltip(d)}
+                    className="flex items-center gap-3 group cursor-pointer"
+                  >
+                    {/* Month Label */}
+                    <div className="w-16 sm:w-24 text-[11px] sm:text-xs text-slate-600 dark:text-slate-400 group-hover:text-cyan-600 dark:group-hover:text-cyan-300 font-medium text-right shrink-0 truncate transition-colors">
+                      {d.month}
+                    </div>
+
+                    {/* Bars Container */}
+                    <div className="flex-1 space-y-1.5 bg-slate-50/70 dark:bg-slate-900/40 p-2 rounded-xl border border-slate-200/90 dark:border-slate-800/80 group-hover:border-cyan-500/40 transition-colors">
+                      {/* Neon Red Border Bar (Expense / Use) */}
+                      <div className="h-3 sm:h-3.5 flex items-center">
+                        <div
+                          style={{ width: `${Math.max(Math.min(usePct, 100), d.use > 0 ? 3 : 0)}%` }}
+                          className="h-full bg-transparent border-2 border-red-500 dark:border-red-400 rounded-md shadow-[0_0_8px_rgba(239,68,68,0.45)] transition-all duration-300"
+                        />
+                      </div>
+
+                      {/* Neon Yellow Border Bar (Interest & Fee) */}
+                      {d.intFee > 0 && (
+                        <div className="h-2.5 sm:h-3 flex items-center">
+                          <div
+                            style={{ width: `${Math.max(Math.min(intPct, 100), 3)}%` }}
+                            className="h-full bg-transparent border-2 border-yellow-400 dark:border-yellow-300 rounded-md shadow-[0_0_8px_rgba(250,204,21,0.45)] transition-all duration-300"
+                          />
+                        </div>
+                      )}
+
+                      {/* Neon Green Border Bar (Payment / Pay) */}
+                      <div className="h-3 sm:h-3.5 flex items-center">
+                        <div
+                          style={{ width: `${Math.max(Math.min(payPct, 100), d.pay > 0 ? 3 : 0)}%` }}
+                          className="h-full bg-transparent border-2 border-emerald-400 dark:border-emerald-300 rounded-md shadow-[0_0_8px_rgba(52,211,153,0.45)] transition-all duration-300"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Vertical Neon Columns (Empty fill, neon glowing borders) */
+          <div className="pt-6">
+            <div className="flex items-end gap-2 sm:gap-4 h-64 overflow-x-auto pb-4 pt-2">
+              {chartData.map((d) => {
+                const useHeight = (d.use / maxValue) * 100;
+                const intHeight = (d.intFee / maxValue) * 100;
+                const payHeight = (d.pay / maxValue) * 100;
+
+                return (
+                  <div
+                    key={d.month}
+                    onMouseEnter={() => setActiveTooltip(d)}
+                    onClick={() => setActiveTooltip(d)}
+                    className="flex flex-col items-center flex-1 min-w-[50px] h-full justify-end cursor-pointer group"
+                  >
+                    <div className="flex items-end gap-1.5 h-48 w-full justify-center px-1">
+                      {/* Neon Red Use Column (Expense) */}
+                      <div
+                        style={{ height: `${Math.max(useHeight, 3)}%` }}
+                        className="w-3.5 sm:w-4.5 rounded-t-md bg-transparent border-2 border-red-500 dark:border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.45)] transition-all group-hover:brightness-125"
+                        title={`Use: Rs. ${formatCurrency(d.use)}`}
+                      />
+
+                      {/* Neon Yellow Int Column (Interest) */}
+                      {d.intFee > 0 && (
+                        <div
+                          style={{ height: `${Math.max(intHeight, 3)}%` }}
+                          className="w-3 sm:w-3.5 rounded-t-md bg-transparent border-2 border-yellow-400 dark:border-yellow-300 shadow-[0_0_8px_rgba(250,204,21,0.45)] transition-all"
+                          title={`Int: Rs. ${formatCurrency(d.intFee)}`}
+                        />
+                      )}
+
+                      {/* Neon Green Pay Column (Payment) */}
+                      <div
+                        style={{ height: `${Math.max(payHeight, 3)}%` }}
+                        className="w-3.5 sm:w-4.5 rounded-t-md bg-transparent border-2 border-emerald-400 dark:border-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.45)] transition-all group-hover:brightness-125"
+                        title={`Pay: Rs. ${formatCurrency(d.pay)}`}
+                      />
+                    </div>
+
+                    <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-2 rotate-[-45deg] origin-top-left group-hover:text-cyan-600 dark:group-hover:text-cyan-300 whitespace-nowrap font-medium transition-colors">
+                      {d.month}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
-
-      {showConfirmSync && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-slate-900 dark:text-white">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <h4 className="text-base font-bold mb-1.5">
-              Sync to Google Drive?
-            </h4>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
-              This will update your{' '}
-              <strong className="text-slate-900 dark:text-white">CrediTrack_Card_Manager</strong>{' '}
-              spreadsheet in Google Drive with the latest credit card balances and transactions.
-            </p>
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmSync(false)}
-                className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowConfirmSync(false);
-                  onSyncNow();
-                }}
-                className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20"
-              >
-                Confirm Sync
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -660,618 +598,368 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
 
 ---
 
-### 4. `src/App.tsx`
+## 3. `src/components/tracker/AnalyticsChart.tsx`
+
 ```tsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { CardProfile, SecurityConfig, Transaction } from './types';
-import { 
-  getStoredSecurityConfig, 
-  saveSecurityConfig 
-} from './utils/security';
-import { 
-  INITIAL_CARDS, 
-  INITIAL_COMMERCIAL_TRANSACTIONS, 
-  INITIAL_SAMPATH_TRANSACTIONS, 
-  recalculateBalances 
-} from './data/initialData';
-import { PinScreen } from './components/security/PinScreen';
-import { Header } from './components/common/Header';
-import { BottomNav } from './components/common/BottomNav';
-import { Dashboard } from './components/dashboard/Dashboard';
-import { CardDetailView } from './components/tracker/CardDetailView';
-import { SheetsOnboardingGuide } from './components/sheets/SheetsOnboardingGuide';
-import { SettingsModal } from './components/settings/SettingsModal';
-import { 
-  initAuth, 
-  googleSignIn, 
-  googleSignOut, 
-  getAccessToken 
-} from './utils/googleAuth';
-import { 
-  findOrCreateSpreadsheet, 
-  syncAllCardsToGoogleSheet, 
-  appendTransactionToGoogleSheet, 
-  GoogleSpreadsheetInfo 
-} from './utils/googleDriveSync';
+import React, { useState, useMemo } from 'react';
+import { BarChart3, AlignLeft, LayoutGrid, Calendar } from 'lucide-react';
+import { Transaction } from '../../types';
+import { COMMERCIAL_BANK_MONTHLY_HISTORY } from '../../data/initialData';
+import { formatCurrency } from '../../utils/formatters';
 
-const CARDS_STORAGE_KEY = 'creditrack_cards_v1';
-const TXS_STORAGE_KEY = 'creditrack_transactions_v1';
-const SHEET_INFO_STORAGE_KEY = 'creditrack_google_sheet_info';
+interface AnalyticsChartProps {
+  cardId: string;
+  transactions: Transaction[];
+}
 
-export default function App() {
-  const [securityConfig, setSecurityConfig] = useState<SecurityConfig>(() => getStoredSecurityConfig());
-  const [isLocked, setIsLocked] = useState<boolean>(() => {
-    const config = getStoredSecurityConfig();
-    return config.isPinSet ? true : true;
-  });
-
-  const [cards, setCards] = useState<CardProfile[]>(() => {
-    try {
-      const stored = localStorage.getItem(CARDS_STORAGE_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch (e) {
-      console.error(e);
-    }
-    return INITIAL_CARDS;
-  });
-
-  const [transactionsByCard, setTransactionsByCard] = useState<Record<string, Transaction[]>>(() => {
-    try {
-      const stored = localStorage.getItem(TXS_STORAGE_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch (e) {
-      console.error(e);
-    }
-    return {
-      'card-commercial-bank': recalculateBalances(INITIAL_COMMERCIAL_TRANSACTIONS),
-      'card-sampath-bank': recalculateBalances(INITIAL_SAMPATH_TRANSACTIONS),
-    };
-  });
-
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [isGuideOpen, setIsGuideOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [bottomNavTab, setBottomNavTab] = useState<'dashboard' | 'cards' | 'guide' | 'settings'>('dashboard');
-
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    try {
-      const stored = localStorage.getItem('creditrack_theme');
-      if (stored === 'light' || stored === 'dark') return stored;
-    } catch (e) {
-      console.error(e);
-    }
-    return 'dark';
-  });
-
-  const [googleUser, setGoogleUser] = useState<{
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
+export const AnalyticsChart: React.FC<AnalyticsChartProps> = ({ cardId, transactions }) => {
+  const isCommercial = cardId === 'card-commercial-bank';
+  const [timeRange, setTimeRange] = useState<'6m' | '12m' | 'all'>('all');
+  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [activeTooltip, setActiveTooltip] = useState<{
+    month: string;
+    use: number;
+    intFee: number;
+    pay: number;
   } | null>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [spreadsheetInfo, setSpreadsheetInfo] = useState<GoogleSpreadsheetInfo | null>(() => {
-    try {
-      const stored = localStorage.getItem(SHEET_INFO_STORAGE_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch (e) {
-      console.error(e);
-    }
-    return null;
-  });
-  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
-  const [isSyncingGoogle, setIsSyncingGoogle] = useState(false);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('creditrack_theme', theme);
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [theme]);
+  // Group transactions by month
+  const chartData = useMemo(() => {
+    const map = new Map<string, { use: number; intFee: number; pay: number }>();
 
-  const handleToggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  };
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CARDS_STORAGE_KEY, JSON.stringify(cards));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [cards]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(TXS_STORAGE_KEY, JSON.stringify(transactionsByCard));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [transactionsByCard]);
-
-  useEffect(() => {
-    try {
-      if (spreadsheetInfo) {
-        localStorage.setItem(SHEET_INFO_STORAGE_KEY, JSON.stringify(spreadsheetInfo));
-      } else {
-        localStorage.removeItem(SHEET_INFO_STORAGE_KEY);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [spreadsheetInfo]);
-
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user, token) => {
-        setGoogleUser({
-          displayName: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL,
+    if (isCommercial) {
+      COMMERCIAL_BANK_MONTHLY_HISTORY.forEach((item) => {
+        map.set(item.month, {
+          use: item.use,
+          intFee: item.intFee,
+          pay: item.pay,
         });
-        if (token) {
-          setGoogleToken(token);
-        }
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!securityConfig.isPinSet || isLocked) return;
-
-    let timeoutId: any;
-    const resetTimer = () => {
-      clearTimeout(timeoutId);
-      const minutes = securityConfig.lockTimeoutMinutes || 5;
-      timeoutId = setTimeout(() => {
-        setIsLocked(true);
-      }, minutes * 60 * 1000);
-    };
-
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
-    events.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }));
-    resetTimer();
-
-    return () => {
-      clearTimeout(timeoutId);
-      events.forEach((evt) => window.removeEventListener(evt, resetTimer));
-    };
-  }, [securityConfig, isLocked]);
-
-  const handleSignInGoogle = async () => {
-    setIsConnectingGoogle(true);
-    try {
-      const authResult = await googleSignIn();
-      if (!authResult) return;
-
-      setGoogleUser({
-        displayName: authResult.user.displayName,
-        email: authResult.user.email,
-        photoURL: authResult.user.photoURL,
       });
-      setGoogleToken(authResult.accessToken);
-
-      setIsSyncingGoogle(true);
-      const sheetResult = await findOrCreateSpreadsheet(authResult.accessToken);
-
-      const syncResult = await syncAllCardsToGoogleSheet(
-        authResult.accessToken,
-        sheetResult.spreadsheetId,
-        cards,
-        transactionsByCard
-      );
-
-      const newInfo: GoogleSpreadsheetInfo = {
-        spreadsheetId: sheetResult.spreadsheetId,
-        webViewLink: sheetResult.webViewLink,
-        title: 'CrediTrack_Card_Manager',
-        lastSyncedAt: Date.now(),
-        lastSyncStatus: syncResult.success ? 'success' : 'error',
-      };
-      setSpreadsheetInfo(newInfo);
-    } catch (err: any) {
-      console.error('Google Drive sign-in/sync failed:', err);
-      alert(`Google Drive error: ${err?.message || 'Could not complete Google setup.'}`);
-    } finally {
-      setIsConnectingGoogle(false);
-      setIsSyncingGoogle(false);
-    }
-  };
-
-  const handleSignOutGoogle = async () => {
-    await googleSignOut();
-    setGoogleUser(null);
-    setGoogleToken(null);
-  };
-
-  const handleSyncGoogleNow = async () => {
-    let token = googleToken;
-    if (!token) {
-      token = await getAccessToken();
-    }
-    if (!token) {
-      handleSignInGoogle();
-      return;
     }
 
-    setIsSyncingGoogle(true);
-    try {
-      let sheetId = spreadsheetInfo?.spreadsheetId;
-      let webViewLink = spreadsheetInfo?.webViewLink;
-
-      if (!sheetId) {
-        const found = await findOrCreateSpreadsheet(token);
-        sheetId = found.spreadsheetId;
-        webViewLink = found.webViewLink;
+    transactions.forEach((tx) => {
+      const m = tx.month || 'Other';
+      if (!map.has(m)) {
+        map.set(m, { use: 0, intFee: 0, pay: 0 });
       }
-
-      const res = await syncAllCardsToGoogleSheet(
-        token,
-        sheetId,
-        cards,
-        transactionsByCard
-      );
-
-      setSpreadsheetInfo((prev) => ({
-        spreadsheetId: sheetId!,
-        webViewLink: webViewLink || `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
-        title: 'CrediTrack_Card_Manager',
-        lastSyncedAt: Date.now(),
-        lastSyncStatus: res.success ? 'success' : 'error',
-      }));
-    } catch (err: any) {
-      console.error('Manual sync failed:', err);
-    } finally {
-      setIsSyncingGoogle(false);
-    }
-  };
-
-  const handleUnlockSuccess = () => {
-    setIsLocked(false);
-  };
-
-  const handlePinConfigured = (newConfig: SecurityConfig) => {
-    saveSecurityConfig(newConfig);
-    setSecurityConfig(newConfig);
-    setIsLocked(false);
-  };
-
-  const handleManualLock = () => {
-    setIsLocked(true);
-  };
-
-  const handleAddCard = (newCard: CardProfile) => {
-    setCards((prev) => [...prev, newCard]);
-    setTransactionsByCard((prev) => ({
-      ...prev,
-      [newCard.id]: [],
-    }));
-    setSelectedCardId(newCard.id);
-  };
-
-  const handleDeleteCard = (cardId: string) => {
-    setCards((prev) => prev.filter((c) => c.id !== cardId));
-    setTransactionsByCard((prev) => {
-      const copy = { ...prev };
-      delete copy[cardId];
-      return copy;
+      const cur = map.get(m)!;
+      if (tx.type === 'Pay') {
+        cur.pay += tx.amount;
+      } else if (tx.type === 'Interest/Fee') {
+        cur.intFee += tx.amount;
+      } else {
+        cur.use += tx.amount;
+      }
     });
-    if (selectedCardId === cardId) {
-      setSelectedCardId(null);
+
+    let list = Array.from(map.entries()).map(([month, vals]) => ({
+      month,
+      use: Math.round(vals.use * 100) / 100,
+      intFee: Math.round(vals.intFee * 100) / 100,
+      pay: Math.round(vals.pay * 100) / 100,
+    }));
+
+    if (timeRange === '6m') {
+      list = list.slice(-6);
+    } else if (timeRange === '12m') {
+      list = list.slice(-12);
     }
 
-    if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      const remainingCards = cards.filter((c) => c.id !== cardId);
-      const remainingTxs = { ...transactionsByCard };
-      delete remainingTxs[cardId];
-      syncAllCardsToGoogleSheet(
-        googleToken,
-        spreadsheetInfo.spreadsheetId,
-        remainingCards,
-        remainingTxs
-      ).catch((err) => console.error('Sheet update on card delete failed:', err));
-    }
-  };
+    return list;
+  }, [cardId, transactions, isCommercial, timeRange]);
 
-  const handleUpdateCardConfig = (cardId: string, updated: Partial<CardProfile>) => {
-    setCards((prev) =>
-      prev.map((c) => (c.id === cardId ? { ...c, ...updated } : c))
-    );
-  };
+  const maxValue = useMemo(() => {
+    let max = 10000;
+    chartData.forEach((d) => {
+      if (d.use > max) max = d.use;
+      if (d.pay > max) max = d.pay;
+      if (d.intFee > max) max = d.intFee;
+    });
+    return Math.ceil(max / 50000) * 50000 || 200000;
+  }, [chartData]);
 
-  const handleAddTransaction = useCallback(
-    async (txData: Omit<Transaction, 'id' | 'balance' | 'createdAt'>) => {
-      const cardId = txData.cardId;
-      const targetCard = cards.find((c) => c.id === cardId);
-
-      let finalTx: Transaction;
-
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const newTx: Transaction = {
-          ...txData,
-          id: `tx-${Date.now()}`,
-          balance: 0,
-          createdAt: Date.now(),
-          syncedToSheet: Boolean(spreadsheetInfo?.spreadsheetId),
-        };
-        const updatedList = recalculateBalances([...existing, newTx]);
-        finalTx = updatedList[updatedList.length - 1];
-
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          appendTransactionToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            finalTx,
-            targetCard?.name || 'Credit Card'
-          ).catch((e) => console.error('Auto-append to Google Sheet failed:', e));
-        }
-
-        return {
-          ...prev,
-          [cardId]: updatedList,
-        };
-      });
-    },
-    [cards, googleToken, spreadsheetInfo]
-  );
-
-  const handleEditTransaction = useCallback(
-    async (updatedTx: Transaction) => {
-      const cardId = updatedTx.cardId;
-
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const index = existing.findIndex((t) => t.id === updatedTx.id);
-        if (index === -1) return prev;
-
-        const updated = [...existing];
-        updated[index] = updatedTx;
-        const recalculated = recalculateBalances(updated);
-
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
-
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on edit failed:', e));
-        }
-
-        return newMap;
-      });
-    },
-    [cards, googleToken, spreadsheetInfo]
-  );
-
-  const handleDeleteTransaction = useCallback(
-    async (txToDelete: Transaction) => {
-      const cardId = txToDelete.cardId;
-
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const filtered = existing.filter((t) => t.id !== txToDelete.id);
-        const recalculated = recalculateBalances(filtered);
-
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
-
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on delete failed:', e));
-        }
-
-        return newMap;
-      });
-    },
-    [cards, googleToken, spreadsheetInfo]
-  );
-
-  const handleImportTransactions = useCallback(
-    (cardId: string, imported: Transaction[], mode: 'replace' | 'append') => {
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const combined = mode === 'replace' ? imported : [...existing, ...imported];
-        const recalculated = recalculateBalances(combined);
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
-
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on import failed:', e));
-        }
-
-        return newMap;
-      });
-    },
-    [cards, googleToken, spreadsheetInfo]
-  );
-
-  const handleResetToDefault = () => {
-    const initialTxs = {
-      'card-commercial-bank': recalculateBalances(INITIAL_COMMERCIAL_TRANSACTIONS),
-      'card-sampath-bank': recalculateBalances(INITIAL_SAMPATH_TRANSACTIONS),
-    };
-    setCards(INITIAL_CARDS);
-    setTransactionsByCard(initialTxs);
-    setSelectedCardId(null);
-
-    if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      syncAllCardsToGoogleSheet(
-        googleToken,
-        spreadsheetInfo.spreadsheetId,
-        INITIAL_CARDS,
-        initialTxs
-      ).catch((e) => console.error('Sheet update on reset failed:', e));
-    }
-  };
-
-  const handleRestoreAllData = (
-    restoredCards: CardProfile[],
-    restoredTxs: Record<string, Transaction[]>
-  ) => {
-    setCards(restoredCards);
-    setTransactionsByCard(restoredTxs);
-
-    if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      syncAllCardsToGoogleSheet(
-        googleToken,
-        spreadsheetInfo.spreadsheetId,
-        restoredCards,
-        restoredTxs
-      ).catch((e) => console.error('Sheet update on restore failed:', e));
-    }
-  };
-
-  const activeCard = cards.find((c) => c.id === selectedCardId) || null;
-
-  if (!securityConfig.isPinSet || isLocked) {
-    return (
-      <PinScreen
-        securityConfig={securityConfig}
-        onUnlockSuccess={handleUnlockSuccess}
-        onPinConfigured={handlePinConfigured}
-      />
-    );
-  }
+  const tickMarks = [0, maxValue * 0.25, maxValue * 0.5, maxValue * 0.75, maxValue];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans antialiased transition-colors duration-200">
-      <Header
-        onLockApp={handleManualLock}
-        onOpenGuide={() => setIsGuideOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onNavigateHome={() => setSelectedCardId(null)}
-        activeView={selectedCardId ? 'tracker' : 'dashboard'}
-        theme={theme}
-        onToggleTheme={handleToggleTheme}
-      />
+    <div className="space-y-4">
+      {/* Controls Bar with Neon Touch */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-sm dark:shadow-xl transition-colors">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-400/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-[0_0_10px_rgba(16,185,129,0.25)]">
+            <BarChart3 className="w-4 h-4 stroke-[2.2]" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-slate-900 dark:text-white drop-shadow-[0_0_6px_rgba(16,185,129,0.2)]">
+              Payment History Analytics
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">Monthly breakdown: Use vs Int & Fee vs Pay</p>
+          </div>
+        </div>
 
-      <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-20">
-        {activeCard ? (
-          <CardDetailView
-            card={activeCard}
-            transactions={transactionsByCard[activeCard.id] || []}
-            onBack={() => setSelectedCardId(null)}
-            onAddTransaction={handleAddTransaction}
-            onEditTransaction={handleEditTransaction}
-            onDeleteTransaction={handleDeleteTransaction}
-            onDeleteCard={handleDeleteCard}
-            onImportTransactions={(imported, mode) =>
-              handleImportTransactions(activeCard.id, imported, mode)
-            }
-            onUpdateCardConfig={handleUpdateCardConfig}
-            onOpenGuide={() => setIsGuideOpen(true)}
-            googleUser={googleUser}
-            spreadsheetInfo={spreadsheetInfo}
-            onSyncAllToGoogleDrive={handleSyncGoogleNow}
-            isGoogleSyncing={isSyncingGoogle}
-            onConnectGoogle={handleSignInGoogle}
-          />
-        ) : (
-          <Dashboard
-            cards={cards}
-            transactionsByCard={transactionsByCard}
-            onSelectCard={(card) => setSelectedCardId(card.id)}
-            onAddCard={handleAddCard}
-            onDeleteCard={handleDeleteCard}
-            onOpenGuide={() => setIsGuideOpen(true)}
-            googleUser={googleUser}
-            spreadsheetInfo={spreadsheetInfo}
-            isConnectingGoogle={isConnectingGoogle}
-            isSyncingGoogle={isSyncingGoogle}
-            onSignInGoogle={handleSignInGoogle}
-            onSignOutGoogle={handleSignOutGoogle}
-            onSyncGoogleNow={handleSyncGoogleNow}
-          />
+        <div className="flex items-center gap-2">
+          {/* Time range buttons with Neon Glow */}
+          <div className="flex items-center bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/90 dark:border-slate-800 text-[11px]">
+            <button
+              onClick={() => setTimeRange('6m')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                timeRange === '6m' 
+                  ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              6M
+            </button>
+            <button
+              onClick={() => setTimeRange('12m')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                timeRange === '12m' 
+                  ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              12M
+            </button>
+            <button
+              onClick={() => setTimeRange('all')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                timeRange === 'all' 
+                  ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              All
+            </button>
+          </div>
+
+          {/* Orientation Toggle */}
+          <div className="flex items-center bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/90 dark:border-slate-800">
+            <button
+              onClick={() => setOrientation('horizontal')}
+              title="Horizontal Bars"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                orientation === 'horizontal' 
+                  ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <AlignLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setOrientation('vertical')}
+              title="Vertical Columns"
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                orientation === 'vertical' 
+                  ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Chart Card */}
+      <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm dark:shadow-2xl p-4 sm:p-6 overflow-hidden transition-colors">
+        {/* Legend with Neon Outline Indicators */}
+        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 pb-4 border-b border-slate-200/90 dark:border-slate-800/80 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-red-500 dark:border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px] sm:text-xs">
+              Monthly Payment History <strong className="text-red-500 dark:text-red-400">Use (Neon Red Expense)</strong>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-yellow-400 dark:border-yellow-300 shadow-[0_0_8px_rgba(250,204,21,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px] sm:text-xs">
+              Monthly Payment History <strong className="text-yellow-600 dark:text-yellow-400">Int & Fee (Neon Yellow Interest)</strong>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded-xs bg-transparent border-2 border-emerald-400 dark:border-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
+            <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px] sm:text-xs">
+              Monthly Payment History <strong className="text-emerald-600 dark:text-emerald-400">Pay (Neon Green Payment)</strong>
+            </span>
+          </div>
+        </div>
+
+        {/* Selected Tooltip Callout */}
+        {activeTooltip && (
+          <div className="my-3 p-3 bg-slate-50 dark:bg-slate-950/90 border border-slate-200/90 dark:border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs animate-fadeIn shadow-xs">
+            <span className="font-bold text-slate-900 dark:text-white">{activeTooltip.month}</span>
+            <div className="flex items-center gap-4 font-mono">
+              <span className="text-red-500 dark:text-red-400 font-bold">
+                Use: <strong>Rs. {formatCurrency(activeTooltip.use)}</strong>
+              </span>
+              {activeTooltip.intFee > 0 && (
+                <span className="text-yellow-600 dark:text-yellow-400 font-bold">
+                  Int & Fee: <strong>Rs. {formatCurrency(activeTooltip.intFee)}</strong>
+                </span>
+              )}
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                Pay: <strong>Rs. {formatCurrency(activeTooltip.pay)}</strong>
+              </span>
+            </div>
+          </div>
         )}
-      </main>
 
-      <BottomNav
-        currentTab={bottomNavTab}
-        onSelectTab={(tab) => {
-          setBottomNavTab(tab);
-          if (tab === 'dashboard') {
-            setSelectedCardId(null);
-          } else if (tab === 'cards') {
-            if (!selectedCardId && cards.length > 0) {
-              setSelectedCardId(cards[0].id);
-            }
-          } else if (tab === 'guide') {
-            setIsGuideOpen(true);
-          } else if (tab === 'settings') {
-            setIsSettingsOpen(true);
-          }
-        }}
-      />
+        {/* HORIZONTAL BARS VIEW */}
+        {orientation === 'horizontal' ? (
+          <div className="space-y-4 pt-4">
+            <div className="flex justify-between pl-20 sm:pl-28 text-[10px] text-slate-500 dark:text-slate-400 font-mono border-b border-slate-200/90 dark:border-slate-800 pb-1">
+              {tickMarks.map((tick, i) => (
+                <span key={i} className="text-center font-semibold">
+                  {tick === 0 ? '-' : `${Math.round(tick / 1000)}k`}
+                </span>
+              ))}
+            </div>
 
-      {isGuideOpen && (
-        <SheetsOnboardingGuide
-          onClose={() => setIsGuideOpen(false)}
-          onConnectGoogle={handleSignInGoogle}
-          isConnected={Boolean(googleUser && spreadsheetInfo?.spreadsheetId)}
-          sheetLink={spreadsheetInfo?.webViewLink}
-        />
-      )}
+            <div className="space-y-3.5">
+              {chartData.map((d) => {
+                const usePct = (d.use / maxValue) * 100;
+                const intPct = (d.intFee / maxValue) * 100;
+                const payPct = (d.pay / maxValue) * 100;
 
-      {isSettingsOpen && (
-        <SettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          securityConfig={securityConfig}
-          onUpdateSecurity={(newCfg) => {
-            saveSecurityConfig(newCfg);
-            setSecurityConfig(newCfg);
-          }}
-          cards={cards}
-          transactionsByCard={transactionsByCard}
-          onRestoreAllData={handleRestoreAllData}
-          onResetToDefault={handleResetToDefault}
-          googleUser={googleUser}
-          spreadsheetInfo={spreadsheetInfo}
-          isConnectingGoogle={isConnectingGoogle}
-          isSyncingGoogle={isSyncingGoogle}
-          onSignInGoogle={handleSignInGoogle}
-          onSignOutGoogle={handleSignOutGoogle}
-          onSyncGoogleNow={handleSyncGoogleNow}
-        />
-      )}
+                return (
+                  <div
+                    key={d.month}
+                    onMouseEnter={() => setActiveTooltip(d)}
+                    onClick={() => setActiveTooltip(d)}
+                    className="flex items-center gap-3 group cursor-pointer"
+                  >
+                    <span className="w-20 sm:w-24 text-right font-semibold text-slate-700 dark:text-slate-300 text-xs shrink-0 font-sans group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                      {d.month}
+                    </span>
+
+                    <div className="flex-1 space-y-1.5">
+                      {/* Use bar (Neon Red border, empty fill) */}
+                      {d.use > 0 && (
+                        <div className="flex items-center gap-2">
+                          <div
+                            style={{ width: `${Math.max(usePct, 2)}%` }}
+                            className="h-3 sm:h-3.5 rounded-md bg-transparent border-2 border-red-500 dark:border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.45)] transition-all duration-300"
+                          />
+                          <span className="text-[10px] text-red-500 dark:text-red-400 font-mono font-bold shrink-0">
+                            {formatCurrency(d.use)}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Int & Fee bar (Neon Yellow border, empty fill) */}
+                      {d.intFee > 0 && (
+                        <div className="flex items-center gap-2">
+                          <div
+                            style={{ width: `${Math.max(intPct, 2)}%` }}
+                            className="h-3 sm:h-3.5 rounded-md bg-transparent border-2 border-yellow-400 dark:border-yellow-300 shadow-[0_0_8px_rgba(250,204,21,0.45)] transition-all duration-300"
+                          />
+                          <span className="text-[10px] text-yellow-600 dark:text-yellow-400 font-mono font-bold shrink-0">
+                            {formatCurrency(d.intFee)}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Pay bar (Neon Green border, empty fill) */}
+                      {d.pay > 0 && (
+                        <div className="flex items-center gap-2">
+                          <div
+                            style={{ width: `${Math.max(payPct, 2)}%` }}
+                            className="h-3 sm:h-3.5 rounded-md bg-transparent border-2 border-emerald-400 dark:border-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.45)] transition-all duration-300"
+                          />
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold shrink-0">
+                            {formatCurrency(d.pay)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* VERTICAL COLUMNS VIEW */
+          <div className="pt-6">
+            <div className="h-64 sm:h-72 flex items-end justify-between gap-2 border-b border-slate-200/90 dark:border-slate-800 pb-2 px-2">
+              {chartData.map((d) => {
+                const useHeight = Math.max((d.use / maxValue) * 100, 2);
+                const intHeight = Math.max((d.intFee / maxValue) * 100, 2);
+                const payHeight = Math.max((d.pay / maxValue) * 100, 2);
+
+                return (
+                  <div
+                    key={d.month}
+                    onMouseEnter={() => setActiveTooltip(d)}
+                    onClick={() => setActiveTooltip(d)}
+                    className="flex-1 flex flex-col items-center h-full justify-end group cursor-pointer"
+                  >
+                    <div className="w-full flex items-end justify-center gap-1.5 h-full">
+                      {d.use > 0 && (
+                        <div
+                          style={{ height: `${useHeight}%` }}
+                          className="w-full max-w-[14px] bg-transparent border-2 border-red-500 dark:border-red-400 rounded-t-md shadow-[0_0_8px_rgba(239,68,68,0.45)] transition-all duration-300"
+                        />
+                      )}
+                      {d.intFee > 0 && (
+                        <div
+                          style={{ height: `${intHeight}%` }}
+                          className="w-full max-w-[14px] bg-transparent border-2 border-yellow-400 dark:border-yellow-300 rounded-t-md shadow-[0_0_8px_rgba(250,204,21,0.45)] transition-all duration-300"
+                        />
+                      )}
+                      {d.pay > 0 && (
+                        <div
+                          style={{ height: `${payHeight}%` }}
+                          className="w-full max-w-[14px] bg-transparent border-2 border-emerald-400 dark:border-emerald-300 rounded-t-md shadow-[0_0_8px_rgba(52,211,153,0.45)] transition-all duration-300"
+                        />
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-600 dark:text-slate-400 font-mono mt-2 truncate w-full text-center group-hover:text-emerald-600 dark:group-hover:text-emerald-400 font-bold transition-colors">
+                      {d.month}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
+};
 ```
 
 ---
 
-### Deployment & Verification
-- Compile command: `npm run build`
-- Linter verification: `npm run lint` (0 errors)
-- Dev server execution: `npm run dev` (running on port 3000)
-- Verified automated generation of `CrediTrack_Card_Manager` directly inside Google Drive upon Google Sign-In with standard column headers `Month`, `Date`, `Type`, `Amount`, `Balance`, `Description`, and `Card Name`.
+## 4. `src/App.tsx` (Summary & Theme Provider)
+
+```tsx
+// Key snippet: Light mode default with full theme toggle and Google Drive sync orchestration
+const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+  try {
+    const stored = localStorage.getItem('creditrack_theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch (e) {
+    console.error(e);
+  }
+  return 'light'; // Clean light mode with neon accents
+});
+
+useEffect(() => {
+  localStorage.setItem('creditrack_theme', theme);
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+    document.documentElement.classList.remove('light');
+  } else {
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
+  }
+}, [theme]);
+```
+
+---
+
+## 5. Verification & Test Results
+- `npm run lint` (`tsc --noEmit`): **Passed 0 errors**
+- `compile_applet`: **Build succeeded**
+- Chart bars rendered with 100% transparent/empty centers and luminous neon borders.

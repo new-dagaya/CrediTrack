@@ -1,4 +1,5 @@
 import { CardProfile, Transaction } from '../types';
+import { parseTxDate } from '../utils/formatters';
 
 export const INITIAL_CARDS: CardProfile[] = [
   {
@@ -35,10 +36,18 @@ export const INITIAL_CARDS: CardProfile[] = [
   },
 ];
 
-// Helper to calculate running balances chronologically
+// Helper to calculate running balances chronologically by parsed transaction date
 export function recalculateBalances(transactions: Transaction[], startingBalance = 0): Transaction[] {
+  // Always sort chronologically by transaction date (with createdAt as tie-breaker)
+  const sorted = [...transactions].sort((a, b) => {
+    const timeA = parseTxDate(a.date, a.createdAt);
+    const timeB = parseTxDate(b.date, b.createdAt);
+    if (timeA !== timeB) return timeA - timeB;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  });
+
   let running = startingBalance;
-  return transactions.map((t) => {
+  return sorted.map((t) => {
     if (t.type === 'Pay') {
       running = Math.round((running - t.amount) * 100) / 100;
     } else {

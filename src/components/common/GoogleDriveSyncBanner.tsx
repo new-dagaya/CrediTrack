@@ -67,41 +67,42 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
   if (!user) {
     return (
       <div
-        className={`p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-cyan-500/10 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-slate-900 border border-emerald-500/20 dark:border-emerald-500/30 shadow-xs ${className}`}
+        className={`p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-cyan-500/10 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-slate-900 border border-emerald-500/30 dark:border-emerald-500/30 shadow-xs ${className}`}
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-800 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
+            <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-800 shadow-[0_0_12px_rgba(16,185,129,0.25)] border border-emerald-400/50 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
               <Cloud className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white drop-shadow-[0_0_6px_rgba(16,185,129,0.2)]">
                   Automated Google Drive & Sheets Sync
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
                   Zero Manual Config
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
                 Sign in with Google once. CrediTrack will automatically generate a{' '}
-                <strong className="text-slate-900 dark:text-white font-semibold">
+                <strong className="text-slate-900 dark:text-white font-bold">
                   CrediTrack_Card_Manager
                 </strong>{' '}
-                spreadsheet directly inside your Google Drive with all standard columns and keep all card records synced in real-time.
+                spreadsheet directly inside your Google Drive with separate sheets/tabs per card and keep all card records synced in real-time.
               </p>
             </div>
           </div>
 
           <div className="shrink-0 flex items-center">
+            {/* Neon Google Sign In Button */}
             <button
               onClick={onSignIn}
               disabled={isConnecting}
               type="button"
-              className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-600 font-semibold text-xs transition-all shadow-sm active:scale-95 disabled:opacity-60 cursor-pointer"
+              className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white hover:bg-cyan-50/80 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-cyan-400/60 font-bold text-xs transition-all shadow-[0_0_12px_rgba(6,182,212,0.25)] hover:shadow-[0_0_18px_rgba(6,182,212,0.45)] active:scale-95 disabled:opacity-60 cursor-pointer"
             >
               {isConnecting ? (
-                <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                <RefreshCw className="w-4 h-4 animate-spin text-cyan-600" />
               ) : (
                 <GoogleGIcon />
               )}
@@ -115,7 +116,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
 
   return (
     <div
-      className={`p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs transition-colors ${className}`}
+      className={`p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs transition-colors ${className}`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* Left: User & Sheet status */}
@@ -124,10 +125,10 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
             <img
               src={user.photoURL}
               alt={user.displayName || 'User'}
-              className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-700 object-cover shadow-2xs"
+              className="w-10 h-10 rounded-full border border-emerald-500/50 object-cover shadow-[0_0_10px_rgba(16,185,129,0.25)]"
             />
           ) : (
-            <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-bold text-sm flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-emerald-500 text-slate-950 font-black text-sm flex items-center justify-center shadow-[0_0_10px_rgba(16,185,129,0.35)]">
               {(user.displayName || user.email || 'G')[0].toUpperCase()}
             </div>
           )}
@@ -137,7 +138,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
               <span className="text-xs font-bold text-slate-900 dark:text-white">
                 {user.displayName || user.email}
               </span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/40 px-2 py-0.5 rounded-full">
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400/50 px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.2)]">
                 <CheckCircle2 className="w-3 h-3" />
                 <span>Google Drive Connected</span>
               </span>
@@ -145,7 +146,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
 
             <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="font-mono text-slate-700 dark:text-slate-300 font-medium">
+              <span className="font-mono text-slate-800 dark:text-slate-200 font-semibold">
                 {sheetInfo?.title || 'CrediTrack_Card_Manager'}
               </span>
               {sheetInfo?.lastSyncedAt && (
@@ -160,16 +161,16 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
           </div>
         </div>
 
-        {/* Right: Actions */}
+        {/* Right: Actions with Neon Styling */}
         <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
           {sheetInfo?.webViewLink && (
             <a
               href={sheetInfo.webViewLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50/80 dark:bg-slate-800 dark:hover:bg-slate-700 border border-emerald-400/50 text-xs font-bold text-emerald-700 dark:text-emerald-300 transition-all shadow-[0_0_10px_rgba(16,185,129,0.2)] hover:shadow-[0_0_16px_rgba(16,185,129,0.4)] active:scale-95"
             >
-              <ExternalLink className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <ExternalLink className="w-3.5 h-3.5" />
               <span>Open in Google Sheets</span>
             </a>
           )}
@@ -178,7 +179,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
             type="button"
             onClick={() => setShowConfirmSync(true)}
             disabled={isSyncing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-xs font-black border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 stroke-[2.5] ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
@@ -188,19 +189,19 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
             type="button"
             onClick={onSignOut}
             title="Sign out from Google Drive"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Confirmation Modal for Workspace Data Synchronization Mutation */}
+      {/* Confirmation Modal */}
       {showConfirmSync && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-slate-900 dark:text-white">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3">
-              <FileSpreadsheet className="w-5 h-5" />
+        <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-slate-900 dark:text-white">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 shadow-[0_0_10px_rgba(16,185,129,0.25)]">
+              <FileSpreadsheet className="w-5 h-5 stroke-[2.2]" />
             </div>
             <h4 className="text-base font-bold mb-1.5">
               Sync to Google Drive?
@@ -208,13 +209,13 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
             <p className="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
               This will update your{' '}
               <strong className="text-slate-900 dark:text-white">CrediTrack_Card_Manager</strong>{' '}
-              spreadsheet in Google Drive with the latest credit card balances and transactions.
+              spreadsheet in Google Drive with the latest credit card balances and separate sheet tabs.
             </p>
             <div className="flex gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowConfirmSync(false)}
-                className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer active:scale-95"
               >
                 Cancel
               </button>
@@ -224,7 +225,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
                   setShowConfirmSync(false);
                   onSyncNow();
                 }}
-                className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/20"
+                className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-[0_0_14px_rgba(16,185,129,0.45)] cursor-pointer active:scale-95 transition-all"
               >
                 Confirm Sync
               </button>
