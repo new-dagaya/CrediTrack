@@ -29,13 +29,16 @@ import {
   getAccessToken 
 } from './utils/googleAuth';
 import { 
-  findOrCreateSpreadsheet, 
-  syncAllCardsToGoogleSheet, 
-  appendTransactionToGoogleSheet, 
+  checkSpreadsheetExists,
+  loadDataFromGoogleSpreadsheet,
+  createTrackingSpreadsheet,
+  syncSingleCardTabToGoogleSheet,
+  saveCardMetadataToGoogleSheet,
   ensureCardTabExists,
   deleteCardTabFromGoogleSheet,
   renameCardTabInGoogleSheet,
   getCardTabTitle,
+  SPREADSHEET_NAME,
   GoogleSpreadsheetInfo 
 } from './utils/googleDriveSync';
 
@@ -55,7 +58,6 @@ function loadUserCards(uid?: string | null): CardProfile[] {
   try {
     const stored = localStorage.getItem(getCardsStorageKey(uid));
     if (stored) return JSON.parse(stored);
-    // Legacy storage key fallback for guest
     if (!uid) {
       const legacy = localStorage.getItem('creditrack_cards_v1');
       if (legacy) return JSON.parse(legacy);
@@ -70,7 +72,6 @@ function loadUserTransactions(uid?: string | null): Record<string, Transaction[]
   try {
     const stored = localStorage.getItem(getTxsStorageKey(uid));
     if (stored) return JSON.parse(stored);
-    // Legacy storage key fallback for guest
     if (!uid) {
       const legacy = localStorage.getItem('creditrack_transactions_v1');
       if (legacy) return JSON.parse(legacy);
@@ -110,7 +111,7 @@ export default function App() {
   const [securityConfig, setSecurityConfig] = useState<SecurityConfig>(() => getStoredSecurityConfig(null));
   const [isLocked, setIsLocked] = useState<boolean>(() => {
     const config = getStoredSecurityConfig(null);
-    return config.isPinSet ? true : true; // First launch prompts setup, subsequent prompts PIN
+    return config.isPinSet ? true : true;
   });
 
   // 3. Credit Cards & Transactions State
@@ -153,7 +154,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
-    return 'light'; // Default to light mode with vibrant neon accents
+    return 'light';
   });
 
   // Apply theme class to <html>
@@ -206,10 +207,71 @@ export default function App() {
     }
   }, [spreadsheetInfo, googleUser?.uid]);
 
+  // AUTO-LOAD OR INITIALIZE GOOGLE DRIVE DATA
+  const handleAutoLoadOrInitDrive = useCallback(
+    async (token: string, uid?: string | null) => {
+      setIsConnectingGoogle(true);
+      setIsSyncingGoogle(true);
+      try {
+        // 1. Scan Google Drive to check if "CrediTrack_Card_Manager" already exists
+        const search = await checkSpreadsheetExists(token);
+
+        if (search.exists && search.file) {
+          // If found, automatically read and load all previously saved credit card configurations,
+          // structural tabs, and logged transactions into the app dashboard context
+          const loaded = await loadDataFromGoogleSpreadsheet(token, search.file.id);
+
+          if (loaded.cards && loaded.cards.length > 0) {
+            setCards(loaded.cards);
+            setTransactionsByCard(loaded.transactionsByCard);
+
+            try {
+              localStorage.setItem(getCardsStorageKey(uid), JSON.stringify(loaded.cards));
+              localStorage.setItem(getTxsStorageKey(uid), JSON.stringify(loaded.transactionsByCard));
+            } catch (e) {
+              console.error('Failed caching loaded cards locally:', e);
+            }
+
+            const info: GoogleSpreadsheetInfo = {
+              spreadsheetId: search.file.id,
+              webViewLink: search.file.webViewLink,
+              title: search.file.name || SPREADSHEET_NAME,
+              lastSyncedAt: Date.now(),
+              lastSyncStatus: 'success',
+              syncedTabs: loaded.cards.map(getCardTabTitle),
+            };
+            setSpreadsheetInfo(info);
+            return;
+          }
+        }
+
+        // If it does not exist, only then create a new tracking spreadsheet structure
+        const userCards = loadUserCards(uid);
+        const userTxs = loadUserTransactions(uid);
+        setCards(userCards);
+        setTransactionsByCard(userTxs);
+
+        const created = await createTrackingSpreadsheet(token, userCards, userTxs);
+        setSpreadsheetInfo(created);
+      } catch (err: any) {
+        console.error('Google Drive auto-load/initialization failed:', err);
+        setSpreadsheetInfo((prev) =>
+          prev
+            ? { ...prev, lastSyncStatus: 'error', lastError: err?.message }
+            : null
+        );
+      } finally {
+        setIsConnectingGoogle(false);
+        setIsSyncingGoogle(false);
+      }
+    },
+    []
+  );
+
   // Initialize Firebase Auth listener on startup
   useEffect(() => {
     const unsubscribe = initAuth(
-      (user, token) => {
+      async (user, token) => {
         const userInfo: GoogleUserInfo = {
           uid: user.uid,
           displayName: user.displayName,
@@ -221,21 +283,24 @@ export default function App() {
           setGoogleToken(token);
         }
 
-        // Detect if this Google user has configured a custom PIN on this device:
         const hasPin = hasUserConfiguredPin(user.uid);
         const userSec = getStoredSecurityConfig(user.uid);
         setSecurityConfig(userSec);
 
-        // Load isolated user data
+        // Load isolated user cached data initially
         setCards(loadUserCards(user.uid));
         setTransactionsByCard(loadUserTransactions(user.uid));
         setSpreadsheetInfo(loadUserSheetInfo(user.uid));
 
-        // If new user on this device without PIN, force lock to show "Create Your Secure PIN"
         if (!hasPin) {
           setIsLocked(true);
         } else {
           setIsLocked(userSec.isPinSet ? true : false);
+        }
+
+        // Automatically scan Google Drive and load existing spreadsheet or create if needed
+        if (token) {
+          await handleAutoLoadOrInitDrive(token, user.uid);
         }
       },
       () => {
@@ -244,9 +309,9 @@ export default function App() {
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [handleAutoLoadOrInitDrive]);
 
-  // Delayed Auto-Lock when leaving or minimizing the app (does not lock immediately)
+  // Delayed Auto-Lock when leaving or minimizing the app
   useEffect(() => {
     if (!securityConfig.isPinSet || isLocked) return;
 
@@ -318,7 +383,7 @@ export default function App() {
     await handleSignInGoogle();
   };
 
-  // Google Drive & Sheets: Sign in and automatic multi-sheet spreadsheet generation + initial sync
+  // Google Sign In handler
   const handleSignInGoogle = async () => {
     setIsConnectingGoogle(true);
     try {
@@ -337,50 +402,21 @@ export default function App() {
       setGoogleUser(userInfo);
       setGoogleToken(token);
 
-      // 1. Detect if this user is new to this device or already has a PIN
       const hasPin = hasUserConfiguredPin(user.uid);
       const userSec = getStoredSecurityConfig(user.uid);
       setSecurityConfig(userSec);
 
-      // Load user cards and transactions
-      const userCards = loadUserCards(user.uid);
-      const userTxs = loadUserTransactions(user.uid);
-      setCards(userCards);
-      setTransactionsByCard(userTxs);
-
-      // If new user on this device, prompt them with "Create Your Secure PIN"
       if (!hasPin) {
         setIsLocked(true);
       }
 
-      // 2. Automatically find or create 'CrediTrack_Card_Manager' directly in Google Drive
-      // with separate tabs for EACH credit card!
-      setIsSyncingGoogle(true);
-      const sheetResult = await findOrCreateSpreadsheet(token, userCards);
-
-      // 3. Automatically sync each card's data into its dedicated tab
-      const syncResult = await syncAllCardsToGoogleSheet(
-        token,
-        sheetResult.spreadsheetId,
-        userCards,
-        userTxs
-      );
-
-      const newInfo: GoogleSpreadsheetInfo = {
-        spreadsheetId: sheetResult.spreadsheetId,
-        webViewLink: sheetResult.webViewLink,
-        title: 'CrediTrack_Card_Manager',
-        lastSyncedAt: Date.now(),
-        lastSyncStatus: syncResult.success ? 'success' : 'error',
-        syncedTabs: syncResult.tabs,
-      };
-      setSpreadsheetInfo(newInfo);
+      // Automatically scan Google Drive and auto-load existing data or create new
+      await handleAutoLoadOrInitDrive(token, user.uid);
     } catch (err: any) {
-      console.error('Google Drive sign-in/sync failed:', err);
+      console.error('Google Sign-In failed:', err);
       alert(`Google Drive error: ${err?.message || 'Could not complete Google setup.'}`);
     } finally {
       setIsConnectingGoogle(false);
-      setIsSyncingGoogle(false);
     }
   };
 
@@ -389,7 +425,6 @@ export default function App() {
     setGoogleUser(null);
     setGoogleToken(null);
     setSpreadsheetInfo(null);
-    // Switch back to guest data
     const guestSec = getStoredSecurityConfig(null);
     setSecurityConfig(guestSec);
     setIsLocked(guestSec.isPinSet ? true : false);
@@ -397,51 +432,103 @@ export default function App() {
     setTransactionsByCard(loadUserTransactions(null));
   };
 
-  const handleSyncGoogleNow = async () => {
-    let token = googleToken;
-    if (!token) {
-      token = await getAccessToken();
-    }
-    if (!token) {
-      handleSignInGoogle();
-      return;
-    }
-
-    setIsSyncingGoogle(true);
-    try {
-      let sheetId = spreadsheetInfo?.spreadsheetId;
-      let webViewLink = spreadsheetInfo?.webViewLink;
-
-      if (!sheetId) {
-        const found = await findOrCreateSpreadsheet(token, cards);
-        sheetId = found.spreadsheetId;
-        webViewLink = found.webViewLink;
+  // REAL-TIME AUTOMATIC BACKGROUND SYNC HELPERS
+  const syncCardInBackground = useCallback(
+    async (targetCard: CardProfile, updatedCardTxs: Transaction[]) => {
+      let token = googleToken;
+      if (!token) {
+        token = await getAccessToken();
       }
+      const sheetId = spreadsheetInfo?.spreadsheetId;
+      if (!token || !sheetId) return;
 
-      // Perform dynamic multi-sheet synchronization
-      const res = await syncAllCardsToGoogleSheet(
-        token,
-        sheetId,
-        cards,
-        transactionsByCard
-      );
+      setIsSyncingGoogle(true);
+      try {
+        await syncSingleCardTabToGoogleSheet(token, sheetId, targetCard, updatedCardTxs);
+        setSpreadsheetInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastSyncedAt: Date.now(),
+                lastSyncStatus: 'success',
+              }
+            : null
+        );
+      } catch (err: any) {
+        console.error('Real-time background sync failed for card:', targetCard.name, err);
+        setSpreadsheetInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastSyncStatus: 'error',
+                lastError: err?.message,
+              }
+            : null
+        );
+      } finally {
+        setIsSyncingGoogle(false);
+      }
+    },
+    [googleToken, spreadsheetInfo?.spreadsheetId]
+  );
 
-      setSpreadsheetInfo((prev) => ({
-        spreadsheetId: sheetId!,
-        webViewLink: webViewLink || `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
-        title: 'CrediTrack_Card_Manager',
-        lastSyncedAt: Date.now(),
-        lastSyncStatus: res.success ? 'success' : 'error',
-        syncedTabs: res.tabs,
-      }));
-    } catch (err: any) {
-      console.error('Manual multi-sheet sync failed:', err);
-    } finally {
-      setIsSyncingGoogle(false);
-    }
-  };
+  const syncStructureInBackground = useCallback(
+    async (
+      action: 'add' | 'edit' | 'delete',
+      card: CardProfile,
+      allCards: CardProfile[],
+      oldTitle?: string
+    ) => {
+      let token = googleToken;
+      if (!token) {
+        token = await getAccessToken();
+      }
+      const sheetId = spreadsheetInfo?.spreadsheetId;
+      if (!token || !sheetId) return;
 
-  // PIN security unlock handlers (scoped to current user)
+      setIsSyncingGoogle(true);
+      try {
+        if (action === 'add') {
+          await ensureCardTabExists(token, sheetId, card);
+          await saveCardMetadataToGoogleSheet(token, sheetId, allCards);
+        } else if (action === 'delete') {
+          await deleteCardTabFromGoogleSheet(token, sheetId, card);
+          await saveCardMetadataToGoogleSheet(token, sheetId, allCards);
+        } else if (action === 'edit') {
+          if (oldTitle && oldTitle !== getCardTabTitle(card)) {
+            await renameCardTabInGoogleSheet(token, sheetId, oldTitle, getCardTabTitle(card));
+          }
+          await saveCardMetadataToGoogleSheet(token, sheetId, allCards);
+        }
+        setSpreadsheetInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastSyncedAt: Date.now(),
+                lastSyncStatus: 'success',
+                syncedTabs: allCards.map(getCardTabTitle),
+              }
+            : null
+        );
+      } catch (err: any) {
+        console.error('Real-time background structure sync failed:', err);
+        setSpreadsheetInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastSyncStatus: 'error',
+                lastError: err?.message,
+              }
+            : null
+        );
+      } finally {
+        setIsSyncingGoogle(false);
+      }
+    },
+    [googleToken, spreadsheetInfo?.spreadsheetId]
+  );
+
+  // PIN security unlock handlers
   const handleUnlockSuccess = () => {
     setIsLocked(false);
   };
@@ -456,28 +543,21 @@ export default function App() {
     setIsLocked(true);
   };
 
-  // Card Management handlers
+  // Card Management handlers with real-time automatic background sync
   const handleAddCard = async (newCard: CardProfile) => {
-    setCards((prev) => [...prev, newCard]);
+    const updatedCards = [...cards, newCard];
+    setCards(updatedCards);
     setTransactionsByCard((prev) => ({
       ...prev,
       [newCard.id]: [],
     }));
-    // Instantly navigate to the newly created dedicated tracker page!
     setSelectedCardId(newCard.id);
-
-    // Dynamically create a separate dedicated tab in Google Sheet for this card!
-    if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      try {
-        await ensureCardTabExists(googleToken, spreadsheetInfo.spreadsheetId, newCard);
-      } catch (err) {
-        console.error('Failed to create tab for new card in Google Sheet:', err);
-      }
-    }
+    syncStructureInBackground('add', newCard, updatedCards);
   };
 
   const handleDeleteCard = async (cardId: string) => {
     const cardToDelete = cards.find((c) => c.id === cardId);
+    if (!cardToDelete) return;
     const remainingCards = cards.filter((c) => c.id !== cardId);
     setCards(remainingCards);
     setTransactionsByCard((prev) => {
@@ -488,165 +568,108 @@ export default function App() {
     if (selectedCardId === cardId) {
       setSelectedCardId(null);
     }
-
-    // Automatically delete the corresponding individual sheet/tab from the Google Sheet file in their Google Drive as well!
-    if (googleToken && spreadsheetInfo?.spreadsheetId && cardToDelete) {
-      try {
-        await deleteCardTabFromGoogleSheet(
-          googleToken,
-          spreadsheetInfo.spreadsheetId,
-          cardToDelete
-        );
-      } catch (err) {
-        console.error('Failed to delete tab from Google Sheet on card deletion:', err);
-      }
-    }
+    syncStructureInBackground('delete', cardToDelete, remainingCards);
   };
 
   const handleUpdateCardConfig = async (cardId: string, updated: Partial<CardProfile>) => {
     const oldCard = cards.find((c) => c.id === cardId);
-    setCards((prev) =>
-      prev.map((c) => (c.id === cardId ? { ...c, ...updated } : c))
-    );
-
-    // If card name was changed, rename its dedicated tab in the Google Sheet!
-    if (
-      googleToken && 
-      spreadsheetInfo?.spreadsheetId && 
-      oldCard && 
-      updated.name && 
-      updated.name !== oldCard.name
-    ) {
-      const oldTitle = getCardTabTitle(oldCard);
-      const newTitle = getCardTabTitle({ ...oldCard, ...updated });
-      try {
-        await renameCardTabInGoogleSheet(
-          googleToken,
-          spreadsheetInfo.spreadsheetId,
-          oldTitle,
-          newTitle
-        );
-      } catch (err) {
-        console.error('Failed to rename tab in Google Sheet on edit:', err);
-      }
-    }
+    if (!oldCard) return;
+    const oldTitle = getCardTabTitle(oldCard);
+    const updatedCards = cards.map((c) => (c.id === cardId ? { ...c, ...updated } : c));
+    const updatedCard = updatedCards.find((c) => c.id === cardId)!;
+    setCards(updatedCards);
+    syncStructureInBackground('edit', updatedCard, updatedCards, oldTitle);
   };
 
-  // Transaction mutations with automatic sequential balance recalculation and live Google Drive multi-sheet sync!
+  // Transaction mutations with automatic chronological balance recalculation and real-time background sync
   const handleAddTransaction = useCallback(
     async (txData: Omit<Transaction, 'id' | 'balance' | 'createdAt'>) => {
       const cardId = txData.cardId;
       const targetCard = cards.find((c) => c.id === cardId);
+      if (!targetCard) return;
 
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const newTx: Transaction = {
-          ...txData,
-          id: `tx-${Date.now()}`,
-          balance: 0,
-          createdAt: Date.now(),
-          syncedToSheet: Boolean(spreadsheetInfo?.spreadsheetId),
-        };
-        const updatedList = recalculateBalances([...existing, newTx]);
-        
-        const newMap = {
-          ...prev,
-          [cardId]: updatedList,
-        };
+      const existing = transactionsByCard[cardId] || [];
+      const newTx: Transaction = {
+        ...txData,
+        id: `tx-${Date.now()}`,
+        balance: 0,
+        createdAt: Date.now(),
+        syncedToSheet: Boolean(spreadsheetInfo?.spreadsheetId),
+      };
+      const updatedList = recalculateBalances([...existing, newTx]);
 
-        // Real-time synchronization to connected Google Sheet
-        if (googleToken && spreadsheetInfo?.spreadsheetId && targetCard) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Real-time sheet sync failed:', e));
-        }
+      setTransactionsByCard((prev) => ({
+        ...prev,
+        [cardId]: updatedList,
+      }));
 
-        return newMap;
-      });
+      // Real-time automatic background sync
+      syncCardInBackground(targetCard, updatedList);
     },
-    [cards, googleToken, spreadsheetInfo]
+    [cards, transactionsByCard, syncCardInBackground, spreadsheetInfo?.spreadsheetId]
   );
 
   const handleEditTransaction = useCallback(
     async (updatedTx: Transaction) => {
       const cardId = updatedTx.cardId;
+      const targetCard = cards.find((c) => c.id === cardId);
+      if (!targetCard) return;
 
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const index = existing.findIndex((t) => t.id === updatedTx.id);
-        if (index === -1) return prev;
+      const existing = transactionsByCard[cardId] || [];
+      const index = existing.findIndex((t) => t.id === updatedTx.id);
+      if (index === -1) return;
 
-        const updated = [...existing];
-        updated[index] = updatedTx;
-        const recalculated = recalculateBalances(updated);
+      const updated = [...existing];
+      updated[index] = updatedTx;
+      const recalculated = recalculateBalances(updated);
 
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
+      setTransactionsByCard((prev) => ({
+        ...prev,
+        [cardId]: recalculated,
+      }));
 
-        // Background sync to live Google Sheet multi-sheet tabs if connected
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on edit failed:', e));
-        }
-
-        return newMap;
-      });
+      // Real-time automatic background sync
+      syncCardInBackground(targetCard, recalculated);
     },
-    [cards, googleToken, spreadsheetInfo]
+    [cards, transactionsByCard, syncCardInBackground]
   );
 
   const handleDeleteTransaction = useCallback(
     async (target: string | Transaction) => {
       const txId = typeof target === 'string' ? target : target.id;
-
-      setTransactionsByCard((prev) => {
-        let cardId = typeof target === 'object' ? target.cardId : '';
-        if (!cardId) {
-          for (const [cId, txs] of Object.entries(prev)) {
-            if (txs.some((t) => t.id === txId)) {
-              cardId = cId;
-              break;
-            }
+      let cardId = typeof target === 'object' ? target.cardId : '';
+      if (!cardId) {
+        for (const [cId, txs] of Object.entries(transactionsByCard)) {
+          if (txs.some((t) => t.id === txId)) {
+            cardId = cId;
+            break;
           }
         }
-        if (!cardId) return prev;
+      }
+      if (!cardId) return;
+      const targetCard = cards.find((c) => c.id === cardId);
+      if (!targetCard) return;
 
-        const existing = prev[cardId] || [];
-        const filtered = existing.filter((t) => t.id !== txId);
-        const recalculated = recalculateBalances(filtered);
+      const existing = transactionsByCard[cardId] || [];
+      const filtered = existing.filter((t) => t.id !== txId);
+      const recalculated = recalculateBalances(filtered);
 
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
+      setTransactionsByCard((prev) => ({
+        ...prev,
+        [cardId]: recalculated,
+      }));
 
-        // Background sync to live Google Sheet multi-sheet tabs if connected
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on delete failed:', e));
-        }
-
-        return newMap;
-      });
+      // Real-time automatic background sync
+      syncCardInBackground(targetCard, recalculated);
     },
-    [cards, googleToken, spreadsheetInfo]
+    [cards, transactionsByCard, syncCardInBackground]
   );
 
   const handleImportTransactions = useCallback(
     (cardId: string, imported: (Transaction | Omit<Transaction, 'id' | 'balance' | 'createdAt'>)[], mode: 'replace' | 'append') => {
+      const targetCard = cards.find((c) => c.id === cardId);
+      if (!targetCard) return;
+
       const preparedTransactions: Transaction[] = imported.map((item, idx) => ({
         ...item,
         id: ('id' in item && item.id) ? item.id : `tx-imp-${Date.now()}-${idx}`,
@@ -654,42 +677,35 @@ export default function App() {
         createdAt: ('createdAt' in item && typeof item.createdAt === 'number') ? item.createdAt : Date.now() + idx,
       }));
 
-      setTransactionsByCard((prev) => {
-        const existing = prev[cardId] || [];
-        const combined = mode === 'replace' ? preparedTransactions : [...existing, ...preparedTransactions];
-        const recalculated = recalculateBalances(combined);
+      const existing = transactionsByCard[cardId] || [];
+      const combined = mode === 'replace' ? preparedTransactions : [...existing, ...preparedTransactions];
+      const recalculated = recalculateBalances(combined);
 
-        const newMap = {
-          ...prev,
-          [cardId]: recalculated,
-        };
+      setTransactionsByCard((prev) => ({
+        ...prev,
+        [cardId]: recalculated,
+      }));
 
-        if (googleToken && spreadsheetInfo?.spreadsheetId) {
-          syncAllCardsToGoogleSheet(
-            googleToken,
-            spreadsheetInfo.spreadsheetId,
-            cards,
-            newMap
-          ).catch((e) => console.error('Auto-sync on import failed:', e));
-        }
-
-        return newMap;
-      });
+      // Real-time automatic background sync
+      syncCardInBackground(targetCard, recalculated);
     },
-    [cards, googleToken, spreadsheetInfo]
+    [cards, transactionsByCard, syncCardInBackground]
   );
 
   const handleRestoreAllData = (newCards: CardProfile[], newTxs: Record<string, Transaction[]>) => {
     setCards(newCards);
     setTransactionsByCard(newTxs);
     if (googleToken && spreadsheetInfo?.spreadsheetId) {
-      syncAllCardsToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, newCards, newTxs);
+      saveCardMetadataToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, newCards);
+      for (const card of newCards) {
+        syncSingleCardTabToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, card, newTxs[card.id] || []);
+      }
     }
   };
 
   const handleResetToDefault = () => {
     if (window.confirm('Reset all cards and transactions to initial defaults?')) {
-      const defaultTxs = {
+      const defaultTxs: Record<string, Transaction[]> = {
         'card-commercial-bank': recalculateBalances(INITIAL_COMMERCIAL_TRANSACTIONS),
         'card-sampath-bank': recalculateBalances(INITIAL_SAMPATH_TRANSACTIONS),
       };
@@ -697,7 +713,10 @@ export default function App() {
       setTransactionsByCard(defaultTxs);
       setSelectedCardId(null);
       if (googleToken && spreadsheetInfo?.spreadsheetId) {
-        syncAllCardsToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, INITIAL_CARDS, defaultTxs);
+        saveCardMetadataToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, INITIAL_CARDS);
+        for (const card of INITIAL_CARDS) {
+          syncSingleCardTabToGoogleSheet(googleToken, spreadsheetInfo.spreadsheetId, card, defaultTxs[card.id] || []);
+        }
       }
     }
   };
@@ -705,7 +724,7 @@ export default function App() {
   // Selected card reference
   const selectedCard = cards.find((c) => c.id === selectedCardId);
 
-  // If locked, render PIN Security Screen with user awareness and new user PIN creation
+  // If locked, render PIN Security Screen
   if (isLocked) {
     return (
       <PinScreen
@@ -713,7 +732,7 @@ export default function App() {
         onUnlockSuccess={handleUnlockSuccess}
         onPinConfigured={handlePinConfigured}
         currentUser={googleUser}
-        onSwitchOrSignInGoogle={handleSignInGoogle}
+        onSwitchOrSignInGoogle={handleRequestSignInGoogle}
         isConnectingGoogle={isConnectingGoogle}
       />
     );
@@ -758,7 +777,6 @@ export default function App() {
             spreadsheetInfo={spreadsheetInfo}
             isGoogleSyncing={isSyncingGoogle}
             onConnectGoogle={handleRequestSignInGoogle}
-            onSyncAllToGoogleDrive={handleSyncGoogleNow}
             initialOpenTxModal={autoOpenTxCardId === selectedCard.id}
           />
         ) : (
@@ -783,7 +801,6 @@ export default function App() {
             isSyncingGoogle={isSyncingGoogle}
             onSignInGoogle={handleRequestSignInGoogle}
             onSignOutGoogle={handleSignOutGoogle}
-            onSyncGoogleNow={handleSyncGoogleNow}
           />
         )}
       </main>
@@ -835,7 +852,6 @@ export default function App() {
         isSyncingGoogle={isSyncingGoogle}
         onSignInGoogle={handleRequestSignInGoogle}
         onSignOutGoogle={handleSignOutGoogle}
-        onSyncGoogleNow={handleSyncGoogleNow}
       />
 
       {/* First-time Google OAuth Permission Consent Prompt */}

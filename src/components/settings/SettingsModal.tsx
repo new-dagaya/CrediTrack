@@ -237,21 +237,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={onSyncGoogleNow}
-                    disabled={isSyncingGoogle}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingGoogle ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingGoogle ? 'Syncing...' : 'Sync All Cards Now'}</span>
-                  </button>
-
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-400/40">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                      Real-time background sync active
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={onSignOutGoogle}
-                    className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-rose-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/90 dark:border-slate-800 text-xs font-bold text-rose-600 dark:text-rose-400 transition-colors cursor-pointer active:scale-95"
+                    className="px-3 py-1.5 rounded-lg bg-white hover:bg-rose-50 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200/90 dark:border-slate-800 text-xs font-bold text-rose-600 dark:text-rose-400 transition-colors cursor-pointer active:scale-95"
                   >
                     Disconnect
                   </button>

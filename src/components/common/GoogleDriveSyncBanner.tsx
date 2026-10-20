@@ -1,15 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   FileSpreadsheet, 
   ExternalLink, 
   RefreshCw, 
   CheckCircle2, 
-  AlertCircle, 
   LogOut, 
-  ShieldCheck,
-  Sparkles,
   Cloud,
-  Check
+  Zap
 } from 'lucide-react';
 import { GoogleSpreadsheetInfo } from '../../utils/googleDriveSync';
 
@@ -24,7 +21,6 @@ interface GoogleDriveSyncBannerProps {
   isSyncing: boolean;
   onSignIn: () => void;
   onSignOut: () => void;
-  onSyncNow: () => void;
   className?: string;
   compact?: boolean;
 }
@@ -36,12 +32,8 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
   isSyncing,
   onSignIn,
   onSignOut,
-  onSyncNow,
   className = '',
-  compact = false,
 }) => {
-  const [showConfirmSync, setShowConfirmSync] = useState(false);
-
   // Official Google Sign-In button SVG
   const GoogleGIcon = () => (
     <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -80,15 +72,15 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
                   Automated Google Drive & Sheets Sync
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
-                  Zero Manual Config
+                  Real-Time Background Sync
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl leading-relaxed">
-                Sign in with Google once. CrediTrack will automatically generate a{' '}
+                Sign in with Google once. CrediTrack will automatically auto-load your existing{' '}
                 <strong className="text-slate-900 dark:text-white font-bold">
                   CrediTrack_Card_Manager
                 </strong>{' '}
-                spreadsheet directly inside your Google Drive with separate sheets/tabs per card and keep all card records synced in real-time.
+                spreadsheet or create a new one, keeping all card records continuously synced in real time.
               </p>
             </div>
           </div>
@@ -134,17 +126,17 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
           )}
 
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-slate-900 dark:text-white">
                 {user.displayName || user.email}
               </span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400/50 px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.2)]">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>Google Drive Connected</span>
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400/50 px-2 py-0.5 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.2)]">
+                <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-cyan-400 animate-spin' : 'bg-emerald-500 animate-pulse'}`} />
+                <span>{isSyncing ? 'Auto-saving to Sheets...' : 'Real-Time Auto-Sync Active'}</span>
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span className="font-mono text-slate-800 dark:text-slate-200 font-semibold">
                 {sheetInfo?.title || 'CrediTrack_Card_Manager'}
@@ -153,7 +145,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
                 <>
                   <span>•</span>
                   <span>
-                    Synced {new Date(sheetInfo.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    Auto-saved {new Date(sheetInfo.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
                 </>
               )}
@@ -161,7 +153,7 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
           </div>
         </div>
 
-        {/* Right: Actions with Neon Styling */}
+        {/* Right: Actions (No manual sync button needed) */}
         <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
           {sheetInfo?.webViewLink && (
             <a
@@ -177,16 +169,6 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowConfirmSync(true)}
-            disabled={isSyncing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-xs font-black border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 stroke-[2.5] ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-          </button>
-
-          <button
-            type="button"
             onClick={onSignOut}
             title="Sign out from Google Drive"
             className="p-2 rounded-xl text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
@@ -195,44 +177,6 @@ export const GoogleDriveSyncBanner: React.FC<GoogleDriveSyncBannerProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Confirmation Modal */}
-      {showConfirmSync && (
-        <div className="fixed inset-0 z-60 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-slate-900 dark:text-white">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 shadow-[0_0_10px_rgba(16,185,129,0.25)]">
-              <FileSpreadsheet className="w-5 h-5 stroke-[2.2]" />
-            </div>
-            <h4 className="text-base font-bold mb-1.5">
-              Sync to Google Drive?
-            </h4>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
-              This will update your{' '}
-              <strong className="text-slate-900 dark:text-white">CrediTrack_Card_Manager</strong>{' '}
-              spreadsheet in Google Drive with the latest credit card balances and separate sheet tabs.
-            </p>
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => setShowConfirmSync(false)}
-                className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer active:scale-95"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowConfirmSync(false);
-                  onSyncNow();
-                }}
-                className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-[0_0_14px_rgba(16,185,129,0.45)] cursor-pointer active:scale-95 transition-all"
-              >
-                Confirm Sync
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -238,19 +238,12 @@ export const ImportSheetModal: React.FC<ImportSheetModalProps> = ({
                         </a>
                       )}
 
-                      {onSyncGoogleNow && (
-                        <button
-                          type="button"
-                          onClick={onSyncGoogleNow}
-                          disabled={isSyncingGoogle}
-                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-xs border border-emerald-400/80 shadow-[0_0_14px_rgba(16,185,129,0.45)] hover:shadow-[0_0_20px_rgba(16,185,129,0.65)] transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 stroke-[2.5] ${isSyncingGoogle ? 'animate-spin' : ''}`} />
-                          <span>{isSyncingGoogle ? 'Syncing...' : 'Sync Now'}</span>
-                        </button>
-                      )}
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400/50 text-xs font-bold text-emerald-700 dark:text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
+                          <span className={`w-2 h-2 rounded-full ${isSyncingGoogle ? 'bg-cyan-400 animate-spin' : 'bg-emerald-500 animate-pulse'}`} />
+                          <span>{isSyncingGoogle ? 'Auto-saving...' : 'Real-Time Auto-Sync Active'}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">

@@ -50,7 +50,6 @@ interface DashboardProps {
   isSyncingGoogle?: boolean;
   onSignInGoogle?: () => void;
   onSignOutGoogle?: () => void;
-  onSyncGoogleNow?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -68,7 +67,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   isSyncingGoogle = false,
   onSignInGoogle,
   onSignOutGoogle,
-  onSyncGoogleNow,
 }) => {
   const [isAddCardOpen, setIsAddCardOpen] = useState(false);
   const [cardToEdit, setCardToEdit] = useState<CardProfile | null>(null);
@@ -530,7 +528,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           isSyncing={isSyncingGoogle}
           onSignIn={onSignInGoogle || (() => {})}
           onSignOut={onSignOutGoogle || (() => {})}
-          onSyncNow={onSyncGoogleNow || (() => {})}
         />
       </div>
 

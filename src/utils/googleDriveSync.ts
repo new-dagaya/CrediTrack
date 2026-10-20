@@ -1,5 +1,6 @@
 import { CardProfile, Transaction } from '../types';
-import { parseTxDate } from './formatters';
+import { parseTxDate, normalizeTransactionType, getMonthLabel, formatDateForSheet } from './formatters';
+import { recalculateBalances } from '../data/initialData';
 
 export interface GoogleSpreadsheetInfo {
   spreadsheetId: string;
@@ -12,6 +13,7 @@ export interface GoogleSpreadsheetInfo {
 }
 
 export const SPREADSHEET_NAME = 'CrediTrack_Card_Manager';
+export const CONFIG_TAB_TITLE = '_CONFIG_';
 
 // Standard columns for each card's dedicated tab:
 // Month, Date, Type, Amount, Balance, Description
@@ -22,6 +24,19 @@ export const STANDARD_HEADERS = [
   'Amount',
   'Balance',
   'Description',
+];
+
+// Configuration columns for _CONFIG_ tab:
+export const CONFIG_HEADERS = [
+  'ID',
+  'Name',
+  'BankName',
+  'CardMask',
+  'ThemeColor',
+  'CreditLimit',
+  'BillingDay',
+  'TabTitle',
+  'CreatedAt',
 ];
 
 /**
@@ -43,7 +58,6 @@ export function getCardTabTitle(card: CardProfile): string {
   if (!sanitized) {
     sanitized = `CARD_${card.id.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase()}`;
   }
-  // Google Sheets tab length max is 100 characters; keep it under 50
   return sanitized.slice(0, 50);
 }
 
@@ -76,6 +90,269 @@ export async function getSpreadsheetTabs(
 }
 
 /**
+ * Checks Google Drive to determine if the "CrediTrack_Card_Manager" spreadsheet already exists.
+ */
+export async function checkSpreadsheetExists(
+  accessToken: string
+): Promise<{ exists: boolean; file?: { id: string; name: string; webViewLink: string } }> {
+  if (!accessToken) {
+    return { exists: false };
+  }
+
+  const query = encodeURIComponent(
+    `name = '${SPREADSHEET_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`
+  );
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)&pageSize=1`;
+
+  const searchRes = await fetch(searchUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!searchRes.ok) {
+    const errorData = await searchRes.json().catch(() => ({}));
+    throw new Error(
+      errorData?.error?.message || `Google Drive query failed (${searchRes.status})`
+    );
+  }
+
+  const searchData = await searchRes.json();
+  if (searchData.files && searchData.files.length > 0) {
+    const existing = searchData.files[0];
+    return {
+      exists: true,
+      file: {
+        id: existing.id,
+        name: existing.name,
+        webViewLink:
+          existing.webViewLink ||
+          `https://docs.google.com/spreadsheets/d/${existing.id}/edit`,
+      },
+    };
+  }
+
+  return { exists: false };
+}
+
+/**
+ * Reads and auto-loads all previously saved credit card configurations, structural tabs,
+ * and logged transactions from an existing "CrediTrack_Card_Manager" Google Sheet file.
+ * All transactions are returned sorted chronologically by date.
+ */
+export async function loadDataFromGoogleSpreadsheet(
+  accessToken: string,
+  spreadsheetId: string
+): Promise<{
+  cards: CardProfile[];
+  transactionsByCard: Record<string, Transaction[]>;
+  spreadsheetTitle: string;
+}> {
+  if (!accessToken || !spreadsheetId) {
+    throw new Error('Access token and spreadsheet ID are required to load data.');
+  }
+
+  // 1. Fetch spreadsheet metadata to get all sheet tabs
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties.title,sheets.properties(sheetId,title)`;
+  const metaRes = await fetch(metaUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!metaRes.ok) {
+    const errorData = await metaRes.json().catch(() => ({}));
+    throw new Error(
+      errorData?.error?.message || `Failed to fetch spreadsheet metadata: ${metaRes.status}`
+    );
+  }
+
+  const metaData = await metaRes.json();
+  const spreadsheetTitle = metaData.properties?.title || SPREADSHEET_NAME;
+  const existingTabs: { sheetId: number; title: string }[] = (metaData.sheets || []).map((s: any) => ({
+    sheetId: s.properties.sheetId,
+    title: s.properties.title,
+  }));
+
+  const hasConfigTab = existingTabs.some((t) => t.title === CONFIG_TAB_TITLE);
+  const cardTabs = existingTabs.filter(
+    (t) => t.title !== CONFIG_TAB_TITLE && t.title !== 'OVERVIEW' && t.title !== 'CARDS_OVERVIEW'
+  );
+
+  let loadedCards: CardProfile[] = [];
+  const tabToCardMap = new Map<string, CardProfile>();
+
+  // 2. Read Card Profiles from _CONFIG_ tab if present
+  if (hasConfigTab) {
+    try {
+      const configRange = encodeURIComponent(`'${CONFIG_TAB_TITLE}'!A2:I100`);
+      const configUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${configRange}?valueRenderOption=UNFORMATTED_VALUE`;
+      const configRes = await fetch(configUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (configRes.ok) {
+        const configData = await configRes.json();
+        const rows: any[][] = configData.values || [];
+
+        rows.forEach((row, idx) => {
+          if (!row || !row[0]) return;
+          const id = String(row[0]).trim();
+          const name = String(row[1] || 'Credit Card').trim();
+          const bankName = String(row[2] || name).trim();
+          const cardNumberMask = String(row[3] || '•••• 0000').trim();
+          const themeColor = (String(row[4] || 'emerald').toLowerCase() as CardProfile['themeColor']) || 'emerald';
+          const creditLimit = row[5] ? parseFloat(String(row[5])) || undefined : undefined;
+          const billingDay = row[6] ? parseInt(String(row[6]), 10) || undefined : undefined;
+          const tabTitle = String(row[7] || '').trim();
+          const createdAt = row[8] ? parseInt(String(row[8]), 10) || Date.now() : Date.now();
+
+          const card: CardProfile = {
+            id,
+            name,
+            bankName,
+            cardNumberMask,
+            themeColor,
+            creditLimit,
+            billingDay,
+            createdAt,
+          };
+          loadedCards.push(card);
+          if (tabTitle) {
+            tabToCardMap.set(tabTitle.toUpperCase(), card);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Failed reading _CONFIG_ tab, falling back to tab derivation:', e);
+    }
+  }
+
+  // 3. Fallback: If no cards were found in _CONFIG_, derive card configurations from structural tabs
+  if (loadedCards.length === 0) {
+    const palette: CardProfile['themeColor'][] = ['amber', 'emerald', 'cyan', 'purple', 'rose', 'blue'];
+    cardTabs.forEach((tab, index) => {
+      const title = tab.title;
+      // Convert "COMMERCIAL_BANK" to "Commercial Bank"
+      const nameParts = title.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+      const friendlyName = nameParts.join(' ');
+      const id = `card-${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      const color = palette[index % palette.length];
+
+      const card: CardProfile = {
+        id,
+        name: friendlyName,
+        bankName: friendlyName,
+        cardNumberMask: `•••• ${1000 + (index * 1337) % 9000}`,
+        themeColor: color,
+        creditLimit: 250000,
+        billingDay: 15,
+        createdAt: Date.now() - (cardTabs.length - index) * 1000 * 60 * 60 * 24 * 30,
+      };
+
+      loadedCards.push(card);
+      tabToCardMap.set(title.toUpperCase(), card);
+    });
+  } else {
+    // Also associate any remaining card tabs that match by derived title
+    loadedCards.forEach((c) => {
+      const derived = getCardTabTitle(c).toUpperCase();
+      tabToCardMap.set(derived, c);
+    });
+  }
+
+  // 4. Batch read all transaction rows from all card tabs
+  const transactionsByCard: Record<string, Transaction[]> = {};
+  loadedCards.forEach((c) => {
+    transactionsByCard[c.id] = [];
+  });
+
+  const validTabsToFetch = cardTabs.filter((t) => tabToCardMap.has(t.title.toUpperCase()));
+
+  if (validTabsToFetch.length > 0) {
+    const rangesQuery = validTabsToFetch
+      .map((t) => `ranges=${encodeURIComponent(`'${t.title}'!A2:F2000`)}`)
+      .join('&');
+    const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet?${rangesQuery}&valueRenderOption=UNFORMATTED_VALUE`;
+
+    const batchRes = await fetch(batchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (batchRes.ok) {
+      const batchData = await batchRes.json();
+      const valueRanges: any[] = batchData.valueRanges || [];
+
+      valueRanges.forEach((rangeObj, i) => {
+        const tab = validTabsToFetch[i];
+        if (!tab) return;
+        const card = tabToCardMap.get(tab.title.toUpperCase());
+        if (!card) return;
+
+        const rows: any[][] = rangeObj.values || [];
+        const cardTransactions: Transaction[] = [];
+
+        rows.forEach((row, rowIdx) => {
+          if (!row || row.length === 0 || (!row[0] && !row[1] && !row[3])) return;
+
+          const month = String(row[0] || '').trim();
+          const date = String(row[1] || '').trim();
+          const typeStr = String(row[2] || 'Use').trim();
+          const amountRaw = row[3];
+          const amount =
+            typeof amountRaw === 'number'
+              ? amountRaw
+              : parseFloat(String(amountRaw).replace(/[^0-9.-]/g, '')) || 0;
+          const balanceRaw = row[4];
+          const balance =
+            typeof balanceRaw === 'number'
+              ? balanceRaw
+              : parseFloat(String(balanceRaw).replace(/[^0-9.-]/g, '')) || 0;
+          const description = String(row[5] || '').trim();
+
+          const type = normalizeTransactionType(typeStr);
+          const parsedTime = parseTxDate(date) || Date.now() - (rows.length - rowIdx) * 1000;
+
+          cardTransactions.push({
+            id: `tx-${card.id}-${rowIdx}-${parsedTime}`,
+            cardId: card.id,
+            month: month || getMonthLabel(new Date(parsedTime)),
+            date: date || formatDateForSheet(new Date(parsedTime)),
+            type,
+            amount: Math.round(amount * 100) / 100,
+            balance: Math.round(balance * 100) / 100,
+            description,
+            createdAt: parsedTime,
+            syncedToSheet: true,
+          });
+        });
+
+        // Ensure all loaded transactions remain sorted chronologically by date
+        const sorted = [...cardTransactions].sort((a, b) => {
+          const timeA = parseTxDate(a.date, a.createdAt);
+          const timeB = parseTxDate(b.date, b.createdAt);
+          if (timeA !== timeB) return timeA - timeB;
+          return (a.createdAt || 0) - (b.createdAt || 0);
+        });
+
+        transactionsByCard[card.id] = recalculateBalances(sorted);
+      });
+    }
+  }
+
+  // If _CONFIG_ tab was missing, automatically create it and write metadata in the background
+  if (!hasConfigTab && loadedCards.length > 0) {
+    saveCardMetadataToGoogleSheet(accessToken, spreadsheetId, loadedCards).catch((e) =>
+      console.warn('Auto-saving _CONFIG_ tab in background failed:', e)
+    );
+  }
+
+  return {
+    cards: loadedCards,
+    transactionsByCard,
+    spreadsheetTitle,
+  };
+}
+
+/**
  * Creates missing tabs for specified card tab titles in the spreadsheet.
  */
 export async function createTabsIfMissing(
@@ -91,7 +368,6 @@ export async function createTabsIfMissing(
     return existingTabs.map((t) => t.title);
   }
 
-  // Create missing tabs using batchUpdate
   const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
   const requests = missingTitles.map((title) => ({
     addSheet: {
@@ -122,9 +398,11 @@ export async function createTabsIfMissing(
     );
   }
 
-  // Write standard column headers into row 1 of each newly created sheet
+  // Write headers for newly created tabs
   for (const title of missingTitles) {
-    const range = encodeURIComponent(`'${title}'!A1:F1`);
+    const isConfig = title === CONFIG_TAB_TITLE;
+    const headers = isConfig ? CONFIG_HEADERS : STANDARD_HEADERS;
+    const range = encodeURIComponent(`'${title}'!A1:${String.fromCharCode(64 + headers.length)}1`);
     const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
     await fetch(headerUrl, {
       method: 'PUT',
@@ -132,9 +410,7 @@ export async function createTabsIfMissing(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        values: [STANDARD_HEADERS],
-      }),
+      body: JSON.stringify({ values: [headers] }),
     });
   }
 
@@ -143,142 +419,246 @@ export async function createTabsIfMissing(
 }
 
 /**
- * Searches user's Google Drive for existing 'CrediTrack_Card_Manager' spreadsheet,
- * or automatically creates a new one with separate tabs for EACH credit card!
+ * Persists all card profile configurations into the dedicated `_CONFIG_` sheet tab.
  */
-export async function findOrCreateSpreadsheet(
+export async function saveCardMetadataToGoogleSheet(
   accessToken: string,
-  cards: CardProfile[] = []
-): Promise<{ spreadsheetId: string; webViewLink: string; isNew: boolean; createdTabs: string[] }> {
-  if (!accessToken) {
-    throw new Error('Google OAuth access token is required.');
-  }
+  spreadsheetId: string,
+  cards: CardProfile[]
+): Promise<{ success: boolean; error?: string }> {
+  if (!accessToken || !spreadsheetId) return { success: false, error: 'Missing credentials.' };
 
-  // 1. Search Google Drive using files.list
-  const query = encodeURIComponent(
-    `name = '${SPREADSHEET_NAME}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`
-  );
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)&pageSize=5`;
+  try {
+    await createTabsIfMissing(accessToken, spreadsheetId, [CONFIG_TAB_TITLE]);
 
-  const searchRes = await fetch(searchUrl, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+    // Clear existing config rows
+    const clearRange = encodeURIComponent(`'${CONFIG_TAB_TITLE}'!A2:I100`);
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${clearRange}:clear`;
+    await fetch(clearUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-  if (!searchRes.ok) {
-    const errorData = await searchRes.json().catch(() => ({}));
-    throw new Error(
-      errorData?.error?.message || `Google Drive API error: ${searchRes.status}`
-    );
-  }
-
-  const searchData = await searchRes.json();
-
-  if (searchData.files && searchData.files.length > 0) {
-    const existing = searchData.files[0];
-    const sheetId = existing.id;
-    const webViewLink =
-      existing.webViewLink ||
-      `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
-
-    // Ensure all currently registered cards have their individual tabs created
-    const cardTabTitles = cards.map(getCardTabTitle);
-    const existingTabs = await createTabsIfMissing(accessToken, sheetId, cardTabTitles);
-
-    return {
-      spreadsheetId: sheetId,
-      webViewLink,
-      isNew: false,
-      createdTabs: existingTabs,
-    };
-  }
-
-  // 2. Not found: Create new Google Sheet directly via Google Sheets API with individual card tabs
-  const initialTabs = cards.length > 0 
-    ? cards.map((c) => ({
-        properties: {
-          title: getCardTabTitle(c),
-          gridProperties: {
-            frozenRowCount: 1,
-            rowCount: 500,
-            columnCount: 10,
-          },
-        },
-      }))
-    : [
-        {
-          properties: {
-            title: 'CARDS_OVERVIEW',
-            gridProperties: {
-              frozenRowCount: 1,
-              rowCount: 500,
-              columnCount: 10,
-            },
-          },
-        },
-      ];
-
-  const createUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
-  const createPayload = {
-    properties: {
-      title: SPREADSHEET_NAME,
-    },
-    sheets: initialTabs,
-  };
-
-  const createRes = await fetch(createUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(createPayload),
-  });
-
-  if (!createRes.ok) {
-    const errorData = await createRes.json().catch(() => ({}));
-    throw new Error(
-      errorData?.error?.message || `Failed to create Google Sheet: ${createRes.status}`
-    );
-  }
-
-  const createData = await createRes.json();
-  const newSheetId = createData.spreadsheetId;
-  const webViewLink =
-    createData.spreadsheetUrl ||
-    `https://docs.google.com/spreadsheets/d/${newSheetId}/edit`;
-
-  // 3. Populate row 1 of each card tab with standard column headers:
-  // Month, Date, Type, Amount, Balance, Description
-  const createdTabs = (createData.sheets || []).map((s: any) => s.properties.title as string);
-  for (const tabTitle of createdTabs) {
-    const range = encodeURIComponent(`'${tabTitle}'!A1:F1`);
-    const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${newSheetId}/values/${range}?valueInputOption=USER_ENTERED`;
+    // Write header
+    const headerRange = encodeURIComponent(`'${CONFIG_TAB_TITLE}'!A1:I1`);
+    const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${headerRange}?valueInputOption=USER_ENTERED`;
     await fetch(headerUrl, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        values: [STANDARD_HEADERS],
-      }),
+      body: JSON.stringify({ values: [CONFIG_HEADERS] }),
     });
+
+    // Write card metadata rows
+    const rows = cards.map((c) => [
+      c.id,
+      c.name,
+      c.bankName,
+      c.cardNumberMask,
+      c.themeColor,
+      c.creditLimit || '',
+      c.billingDay || '',
+      getCardTabTitle(c),
+      c.createdAt || Date.now(),
+    ]);
+
+    if (rows.length > 0) {
+      const writeRange = encodeURIComponent(`'${CONFIG_TAB_TITLE}'!A2`);
+      const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${writeRange}?valueInputOption=USER_ENTERED`;
+      await fetch(writeUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: rows }),
+      });
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('saveCardMetadataToGoogleSheet error:', error);
+    return { success: false, error: error?.message };
+  }
+}
+
+/**
+ * Creates a brand-new tracking spreadsheet structure in Google Drive with _CONFIG_ tab
+ * and dedicated tabs for each credit card.
+ */
+export async function createTrackingSpreadsheet(
+  accessToken: string,
+  cards: CardProfile[] = [],
+  transactionsByCard: Record<string, Transaction[]> = {}
+): Promise<GoogleSpreadsheetInfo> {
+  if (!accessToken) {
+    throw new Error('Google OAuth access token is required.');
+  }
+
+  // Prepare initial tabs: _CONFIG_ + card tabs
+  const sheetsToCreate = [
+    {
+      properties: {
+        title: CONFIG_TAB_TITLE,
+        gridProperties: { frozenRowCount: 1, rowCount: 100, columnCount: 10 },
+      },
+    },
+    ...cards.map((c) => ({
+      properties: {
+        title: getCardTabTitle(c),
+        gridProperties: { frozenRowCount: 1, rowCount: 500, columnCount: 10 },
+      },
+    })),
+  ];
+
+  if (sheetsToCreate.length === 1) {
+    // If cards is empty, create an overview tab
+    sheetsToCreate.push({
+      properties: {
+        title: 'OVERVIEW',
+        gridProperties: { frozenRowCount: 1, rowCount: 500, columnCount: 10 },
+      },
+    });
+  }
+
+  const createUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
+  const createRes = await fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      properties: { title: SPREADSHEET_NAME },
+      sheets: sheetsToCreate,
+    }),
+  });
+
+  if (!createRes.ok) {
+    const errorData = await createRes.json().catch(() => ({}));
+    throw new Error(
+      errorData?.error?.message || `Failed to create tracking spreadsheet: ${createRes.status}`
+    );
+  }
+
+  const createData = await createRes.json();
+  const newSheetId = createData.spreadsheetId;
+  const webViewLink =
+    createData.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${newSheetId}/edit`;
+
+  // Write _CONFIG_ data
+  await saveCardMetadataToGoogleSheet(accessToken, newSheetId, cards);
+
+  // Write headers and transactions for each card tab
+  for (const card of cards) {
+    const tabTitle = getCardTabTitle(card);
+    const cardTxs = transactionsByCard[card.id] || [];
+    await syncSingleCardTabToGoogleSheet(accessToken, newSheetId, card, cardTxs);
   }
 
   return {
     spreadsheetId: newSheetId,
     webViewLink,
-    isNew: true,
-    createdTabs,
+    title: SPREADSHEET_NAME,
+    lastSyncedAt: Date.now(),
+    lastSyncStatus: 'success',
+    syncedTabs: cards.map(getCardTabTitle),
   };
 }
 
 /**
- * Synchronizes each credit card into its own dedicated sheet (tab)
- * within the 'CrediTrack_Card_Manager' spreadsheet.
- * Each tab independently holds: Month, Date, Type, Amount, Balance, Description.
+ * Real-Time Automatic Sync: Synchronizes a single credit card's transactions to its dedicated sheet tab.
+ * Ensures transactions are sorted chronologically by date and running balances are recalculate-verified.
+ */
+export async function syncSingleCardTabToGoogleSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  card: CardProfile,
+  transactions: Transaction[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  if (!accessToken || !spreadsheetId || !card) {
+    return { success: false, count: 0, error: 'Missing access credentials or card.' };
+  }
+
+  try {
+    const tabTitle = getCardTabTitle(card);
+    await createTabsIfMissing(accessToken, spreadsheetId, [tabTitle]);
+
+    // Ensure transactions are chronologically sorted by date
+    const sortedTxs = [...transactions].sort((a, b) => {
+      const timeA = parseTxDate(a.date, a.createdAt);
+      const timeB = parseTxDate(b.date, b.createdAt);
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+
+    const recalculated = recalculateBalances(sortedTxs);
+
+    const rows: (string | number)[][] = recalculated.map((tx) => [
+      tx.month,
+      tx.date,
+      tx.type,
+      tx.amount,
+      tx.balance,
+      tx.description,
+    ]);
+
+    // 1. Clear existing rows from row 2 downward in this tab
+    const clearRange = encodeURIComponent(`'${tabTitle}'!A2:Z1000`);
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${clearRange}:clear`;
+    await fetch(clearUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    // 2. Ensure row 1 has standard column headers
+    const headerRange = encodeURIComponent(`'${tabTitle}'!A1:F1`);
+    const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${headerRange}?valueInputOption=USER_ENTERED`;
+    await fetch(headerUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: [STANDARD_HEADERS] }),
+    });
+
+    // 3. Write all rows for this card
+    if (rows.length > 0) {
+      const writeRange = encodeURIComponent(`'${tabTitle}'!A2`);
+      const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${writeRange}?valueInputOption=USER_ENTERED`;
+      const writeRes = await fetch(writeUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: rows }),
+      });
+
+      if (!writeRes.ok) {
+        const errData = await writeRes.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `Failed to update tab: ${writeRes.status}`);
+      }
+    }
+
+    return { success: true, count: rows.length };
+  } catch (error: any) {
+    console.error(`syncSingleCardTabToGoogleSheet failed for ${card.name}:`, error);
+    return { success: false, count: 0, error: error?.message || 'Sync failed' };
+  }
+}
+
+/**
+ * Synchronizes all cards and transactions across the entire spreadsheet.
  */
 export async function syncAllCardsToGoogleSheet(
   accessToken: string,
@@ -291,82 +671,19 @@ export async function syncAllCardsToGoogleSheet(
   }
 
   try {
-    // 1. Ensure all card tabs exist
-    const requiredTabTitles = cards.map(getCardTabTitle);
+    const requiredTabTitles = [CONFIG_TAB_TITLE, ...cards.map(getCardTabTitle)];
     await createTabsIfMissing(accessToken, spreadsheetId, requiredTabTitles);
+    await saveCardMetadataToGoogleSheet(accessToken, spreadsheetId, cards);
 
     let totalRowCount = 0;
     const syncedTabs: string[] = [];
 
-    // 2. Write transactions for each card to its dedicated tab
     for (const card of cards) {
-      const tabTitle = getCardTabTitle(card);
-      syncedTabs.push(tabTitle);
-
       const cardTxs = transactionsByCard[card.id] || [];
-      // Sort chronologically by transaction date
-      const sortedTxs = [...cardTxs].sort((a, b) => {
-        const timeA = parseTxDate(a.date, a.createdAt);
-        const timeB = parseTxDate(b.date, b.createdAt);
-        if (timeA !== timeB) return timeA - timeB;
-        return (a.createdAt || 0) - (b.createdAt || 0);
-      });
-
-      const rows: (string | number)[][] = sortedTxs.map((tx) => [
-        tx.month,
-        tx.date,
-        tx.type,
-        tx.amount,
-        tx.balance,
-        tx.description,
-      ]);
-
-      // A. Clear existing rows from row 2 downward in this tab
-      const clearRange = encodeURIComponent(`'${tabTitle}'!A2:Z1000`);
-      const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${clearRange}:clear`;
-      await fetch(clearUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      // B. Ensure row 1 has standard headers: Month, Date, Type, Amount, Balance, Description
-      const headerRange = encodeURIComponent(`'${tabTitle}'!A1:F1`);
-      const headerUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${headerRange}?valueInputOption=USER_ENTERED`;
-      await fetch(headerUrl, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          values: [STANDARD_HEADERS],
-        }),
-      });
-
-      // C. Populate rows for this card
-      if (rows.length > 0) {
-        const writeRange = encodeURIComponent(`'${tabTitle}'!A2`);
-        const writeUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${writeRange}?valueInputOption=USER_ENTERED`;
-        const writeRes = await fetch(writeUrl, {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            values: rows,
-          }),
-        });
-
-        if (!writeRes.ok) {
-          const errData = await writeRes.json().catch(() => ({}));
-          console.warn(`Failed writing to tab ${tabTitle}:`, errData);
-        } else {
-          totalRowCount += rows.length;
-        }
+      const res = await syncSingleCardTabToGoogleSheet(accessToken, spreadsheetId, card, cardTxs);
+      if (res.success) {
+        totalRowCount += res.count;
+        syncedTabs.push(getCardTabTitle(card));
       }
     }
 
@@ -376,7 +693,7 @@ export async function syncAllCardsToGoogleSheet(
       tabs: syncedTabs,
     };
   } catch (error: any) {
-    console.error('Dynamic Multi-Sheet Sync error:', error);
+    console.error('syncAllCardsToGoogleSheet error:', error);
     return {
       success: false,
       count: 0,
@@ -387,8 +704,7 @@ export async function syncAllCardsToGoogleSheet(
 }
 
 /**
- * Appends a newly logged transaction to the card's specific dedicated tab
- * with columns: Month, Date, Type, Amount, Balance, Description.
+ * Appends a newly logged transaction to the card's specific dedicated tab.
  */
 export async function appendTransactionToGoogleSheet(
   accessToken: string,
@@ -400,21 +716,12 @@ export async function appendTransactionToGoogleSheet(
 
   try {
     const tabTitle = getCardTabTitle(card);
-
-    // Ensure tab exists
     await createTabsIfMissing(accessToken, spreadsheetId, [tabTitle]);
 
     const appendRange = encodeURIComponent(`'${tabTitle}'!A:F`);
     const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${appendRange}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
 
-    const row = [
-      tx.month,
-      tx.date,
-      tx.type,
-      tx.amount,
-      tx.balance,
-      tx.description,
-    ];
+    const row = [tx.month, tx.date, tx.type, tx.amount, tx.balance, tx.description];
 
     const res = await fetch(appendUrl, {
       method: 'POST',
@@ -422,9 +729,7 @@ export async function appendTransactionToGoogleSheet(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        values: [row],
-      }),
+      body: JSON.stringify({ values: [row] }),
     });
 
     if (!res.ok) {
@@ -454,7 +759,6 @@ export async function ensureCardTabExists(
 
 /**
  * Dynamically deletes a card's dedicated tab from the Google Sheet in Google Drive.
- * Handles single-tab constraint by ensuring an overview tab exists if deleting the last tab.
  */
 export async function deleteCardTabFromGoogleSheet(
   accessToken: string,
@@ -469,11 +773,9 @@ export async function deleteCardTabFromGoogleSheet(
     const targetTab = existingTabs.find((t) => t.title.toLowerCase() === tabTitle.toLowerCase());
 
     if (!targetTab) {
-      return { success: true }; // Tab already doesn't exist
+      return { success: true };
     }
 
-    // Google Sheets requires at least one sheet tab in a spreadsheet.
-    // If this is the only tab left, create an OVERVIEW placeholder first so deletion succeeds.
     if (existingTabs.length === 1) {
       await createTabsIfMissing(accessToken, spreadsheetId, ['OVERVIEW']);
     }
@@ -486,19 +788,12 @@ export async function deleteCardTabFromGoogleSheet(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        requests: [
-          {
-            deleteSheet: {
-              sheetId: targetTab.sheetId,
-            },
-          },
-        ],
+        requests: [{ deleteSheet: { sheetId: targetTab.sheetId } }],
       }),
     });
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      console.warn('Failed to delete tab from Google Sheet:', errData);
       return { success: false, error: errData?.error?.message || `Failed to delete tab: ${res.status}` };
     }
 
@@ -526,7 +821,6 @@ export async function renameCardTabInGoogleSheet(
     const targetTab = existingTabs.find((t) => t.title.toLowerCase() === oldCardTitle.toLowerCase());
 
     if (!targetTab) {
-      // If old tab not found, just create the new tab
       await createTabsIfMissing(accessToken, spreadsheetId, [newCardTitle]);
       return { success: true };
     }
@@ -564,4 +858,3 @@ export async function renameCardTabInGoogleSheet(
     return { success: false, error: error?.message || 'Failed to rename sheet tab' };
   }
 }
-

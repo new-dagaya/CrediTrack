@@ -147,17 +147,18 @@ export const CardDetailView: React.FC<CardDetailViewProps> = ({
 
         {/* Action Controls for this Card */}
         <div className="flex items-center gap-2">
-          {/* Google Sheets Sync Button */}
-          {spreadsheetInfo?.spreadsheetId ? (
-            <button
-              onClick={onSyncAllToGoogleDrive}
-              disabled={isGoogleSyncing}
-              title="Push changes to your CrediTrack_Card_Manager Google Sheet"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-slate-950 text-xs font-bold border border-cyan-400/80 shadow-[0_0_14px_rgba(6,182,212,0.4)] hover:shadow-[0_0_20px_rgba(6,182,212,0.6)] transition-all cursor-pointer disabled:opacity-60"
+          {/* Google Sheets Link / Connect Drive */}
+          {spreadsheetInfo?.webViewLink ? (
+            <a
+              href={spreadsheetInfo.webViewLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open CrediTrack_Card_Manager in Google Sheets"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-emerald-50/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-emerald-400/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold transition-all shadow-[0_0_10px_rgba(16,185,129,0.2)] active:scale-95 cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isGoogleSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Sync Tab</span>
-            </button>
+              <ExternalLink className="w-3.5 h-3.5 stroke-[2.2]" />
+              <span className="hidden sm:inline">Google Sheet</span>
+            </a>
           ) : (
             <button
               onClick={onConnectGoogle}
